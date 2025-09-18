@@ -1,7 +1,40 @@
 import { IntGrid } from './data-structures';
 
+/*
+  Dead-end Analyzer (moved from level-generator.ts)
+  -------------------------------------------------
+  This module implements a three-tier remediation pipeline to reduce dead ends
+  in the generated path network while strictly preserving the "no two-wide paths"
+  constraint (no 2x2 blocks of PATH tiles).
+
+  Tiers:
+  - Tier 1: Corridor extension with occasional perpendicular branching to find
+            a connection without making 2x2 blocks.
+  - Tier 2: Selective pruning of very short dead-end stubs (length 1–5).
+  - Tier 3: Last resort forced connection using the project's existing A* segment
+            function; placement still respects the 2x2 rule.
+
+  Integration contract:
+  - Call analyzeAndFixDeadEnds(IntGrid, AnalyzerContext, findPathSegment, fixDoubleWide)
+    after initial path carving. Provide:
+      • AnalyzerContext: tile IDs, bounds/utilities, and a double-wide guard.
+      • findPathSegment: your A* function that returns a list of [x,y] or null.
+      • fixDoubleWide: your clean-up pass that removes any 2x2 blocks if they slip in.
+*/
+
+/** Grid coordinate tuple [x, y]. */
 export type Pos = [number, number];
 
+/**
+ * Context supplied by the generator so this module can operate without
+ * duplicating game-specific logic.
+ *
+ * PATH_TILE / REGION_TILE: tile ID values used in the IntGrid
+ * levelSize: [width, height]
+ * inBounds: returns true if position lies inside the grid bounds
+ * getNeighbors: returns 4-connected neighbors in any order
+ * wouldCreateDoubleWideAt: returns true if placing PATH at pos would form a 2x2 block
+ */
 export interface AnalyzerContext {
   PATH_TILE: number;
   REGION_TILE: number;
@@ -11,6 +44,7 @@ export interface AnalyzerContext {
   wouldCreateDoubleWideAt(pos: Pos, intGrid: IntGrid): boolean;
 }
 
+/** Return 4-neighbors of pos that are PATH tiles. */
 function getPathNeighbors(pos: Pos, intGrid: IntGrid, ctx: AnalyzerContext): Pos[] {
   const res: Pos[] = [];
   for (const n of ctx.getNeighbors(pos)) {
@@ -25,6 +59,10 @@ function getPathNeighbors(pos: Pos, intGrid: IntGrid, ctx: AnalyzerContext): Pos
   return res;
 }
 
+/**
+ * Count PATH neighbors for pos, optionally excluding some coordinates.
+ * Useful for degree calculations and to avoid counting tiles inside a block.
+ */
 function countPathConnections(pos: Pos, intGrid: IntGrid, ctx: AnalyzerContext, exclude: Set<string> = new Set()): number {
   let count = 0;
   for (const n of ctx.getNeighbors(pos)) {
@@ -41,6 +79,7 @@ function countPathConnections(pos: Pos, intGrid: IntGrid, ctx: AnalyzerContext, 
   return count;
 }
 
+/** Collect PATH cells with exactly one PATH neighbor (degree == 1). */
 function detectDeadEnds(intGrid: IntGrid, ctx: AnalyzerContext): Pos[] {
   const tips: Pos[] = [];
   for (let x = 0; x < ctx.levelSize[0]; x++) {
@@ -54,6 +93,10 @@ function detectDeadEnds(intGrid: IntGrid, ctx: AnalyzerContext): Pos[] {
   return tips;
 }
 
+/**
+ * For a dead-end tip, return the outward direction vector away from its only
+ * path neighbor, or null if not a true dead end.
+ */
 function getDeadEndDirection(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext): Pos | null {
   const neighbors = getPathNeighbors(tip, intGrid, ctx);
   if (neighbors.length !== 1) return null;
@@ -61,9 +104,15 @@ function getDeadEndDirection(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext): 
   return [tip[0] - n[0], tip[1] - n[1]] as Pos;
 }
 
+// Tier 1: Minimum straight extension probe length (tiles) before giving up
 const TIER1_MIN_EXTENSION = 50;
-const TIER3_SEARCH_RADIUS = 40;
+// Tier 3: Max Manhattan search radius when raycasting for nearby corridors
+const TIER3_SEARCH_RADIUS = 140;
 
+/**
+ * Attempt a perpendicular branch starting from origin while extending forwardDir.
+ * Commits the branch if it reaches an existing PATH without creating 2x2 blocks.
+ */
 function tryBranchFrom(origin: Pos, forwardDir: Pos, intGrid: IntGrid, ctx: AnalyzerContext, maxSteps: number): boolean {
   const perps: Pos[] = (forwardDir[0] !== 0) ? [[0,1],[0,-1]] : [[1,0],[-1,0]];
   if (Math.random() < 0.5) perps.reverse();
@@ -86,6 +135,11 @@ function tryBranchFrom(origin: Pos, forwardDir: Pos, intGrid: IntGrid, ctx: Anal
   return false;
 }
 
+/**
+ * Tier 1: Extend a dead-end forward up to TIER1_MIN_EXTENSION tiles, occasionally
+ * trying a perpendicular branch. Avoids 2x2. Commits the straight tiles even if
+ * not connected; returns true if a connection to existing PATH was found.
+ */
 function tryExtendCorridor(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext): boolean {
   const dir = getDeadEndDirection(tip, intGrid, ctx);
   if (!dir) return false;
@@ -123,6 +177,10 @@ function tryExtendCorridor(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext): bo
   return connected;
 }
 
+/**
+ * Tier 2: Walk the corridor from tip until a junction/end and remove it if its
+ * length is between [minLen, maxLen]. Returns true if pruning occurred.
+ */
 function pruneShortDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, minLen: number, maxLen: number): boolean {
   const inward = getPathNeighbors(tip, intGrid, ctx);
   if (inward.length !== 1) return false;
@@ -148,6 +206,11 @@ function pruneShortDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, min
   return false;
 }
 
+/**
+ * Tier 3: Last resort. Raycast in directions (except back towards corridor) to
+ * find the nearest PATH target; fallback to scanning whole grid for closest PATH.
+ * Then use A* (findPathSegment) to connect while respecting 2x2 guard during placement.
+ */
 function forceConnectDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, findPathSegment: (start: Pos, end: Pos, grid: IntGrid) => Pos[] | null): boolean {
   const neighbors: Pos[] = [];
   for (const n of ctx.getNeighbors(tip)) {
@@ -200,8 +263,12 @@ function forceConnectDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, f
   return true;
 }
 
+/**
+ * Run the tiered pass a limited number of times until no changes occur.
+ * fixDoubleWide() is invoked between tiers to strictly preserve "no two-wide".
+ */
 export function analyzeAndFixDeadEnds(intGrid: IntGrid, ctx: AnalyzerContext, findPathSegment: (start: Pos, end: Pos, grid: IntGrid) => Pos[] | null, fixDoubleWide: (grid: IntGrid) => void) {
-  const maxPasses = 5;
+  const maxPasses = 15;
   for (let pass = 0; pass < maxPasses; pass++) {
     let changed = false;
 
