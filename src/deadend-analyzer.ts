@@ -127,7 +127,15 @@ function tryBranchFrom(origin: Pos, forwardDir: Pos, intGrid: IntGrid, ctx: Anal
         for (const p of branch) intGrid.setTile(p[0], p[1], ctx.PATH_TILE);
         return true;
       }
-      if (ctx.wouldCreateDoubleWideAt(curr, intGrid)) break;
+      if (ctx.wouldCreateDoubleWideAt(curr, intGrid)) {
+        // If we've already carved a short branch and only stopped because of the 2x2 guard,
+        // keep it as a soft attempt to reduce isolated nubs.
+        if (branch.length >= 2) {
+          for (const p of branch) intGrid.setTile(p[0], p[1], ctx.PATH_TILE);
+          return true;
+        }
+        break;
+      }
       branch.push([curr[0], curr[1]]);
       curr = [curr[0] + dir[0], curr[1] + dir[1]];
     }
@@ -183,24 +191,29 @@ function tryExtendCorridor(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext): bo
  */
 function pruneShortDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, minLen: number, maxLen: number): boolean {
   const inward = getPathNeighbors(tip, intGrid, ctx);
-  if (inward.length !== 1) return false;
+  if (inward.length !== 1) return false; // not a dead end
 
-  const corridor: Pos[] = [tip];
+  // Collect only the spur tiles, excluding the base junction tile.
+  const spur: Pos[] = [tip];
   let prev: Pos = tip;
   let curr: Pos = inward[0];
 
   while (true) {
-    corridor.push(curr);
     const nbs = getPathNeighbors(curr, intGrid, ctx);
-    if (nbs.length !== 2) break;
+    if (nbs.length !== 2) {
+      // We've reached the base (junction or another terminal). Do NOT include curr.
+      break;
+    }
+    // Still in a 2-degree corridor segment, include curr and advance.
+    spur.push(curr);
     const next = (nbs[0][0] === prev[0] && nbs[0][1] === prev[1]) ? nbs[1] : nbs[0];
     prev = curr;
     curr = next;
-    if (!ctx.inBounds(curr) || corridor.length > 1000) break;
+    if (!ctx.inBounds(curr) || spur.length > 1000) break;
   }
 
-  if (corridor.length >= minLen && corridor.length <= maxLen) {
-    for (const p of corridor) intGrid.setTile(p[0], p[1], ctx.REGION_TILE);
+  if (spur.length >= minLen && spur.length <= maxLen) {
+    for (const p of spur) intGrid.setTile(p[0], p[1], ctx.REGION_TILE);
     return true;
   }
   return false;
@@ -264,6 +277,43 @@ function forceConnectDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, f
 }
 
 /**
+ * Corner-bridge: fill single REGION cell that touches exactly two PATH
+ * neighbors orthogonally (one vertical, one horizontal), provided doing so
+ * does not create a 2x2. This neatly connects near-miss corridors.
+ */
+function fillCornerBridges(intGrid: IntGrid, ctx: AnalyzerContext): boolean {
+  let changed = false;
+  for (let x = 0; x < ctx.levelSize[0]; x++) {
+    for (let y = 0; y < ctx.levelSize[1]; y++) {
+      if (intGrid.getTile(x, y) !== ctx.REGION_TILE) continue;
+
+      const neighbors = ctx.getNeighbors([x, y]);
+      const pathNeighbors: Pos[] = [];
+      let hasHoriz = false;
+      let hasVert = false;
+
+      for (const n of neighbors) {
+        if (!ctx.inBounds(n)) continue;
+        if (intGrid.getTile(n[0], n[1]) === ctx.PATH_TILE) {
+          pathNeighbors.push(n);
+          if (n[1] === y) hasHoriz = true; // same row -> left/right
+          if (n[0] === x) hasVert = true;  // same column -> up/down
+        }
+      }
+
+      if (pathNeighbors.length === 2 && hasHoriz && hasVert) {
+        const pos: Pos = [x, y];
+        if (!ctx.wouldCreateDoubleWideAt(pos, intGrid)) {
+          intGrid.setTile(x, y, ctx.PATH_TILE);
+          changed = true;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
+/**
  * Run the tiered pass a limited number of times until no changes occur.
  * fixDoubleWide() is invoked between tiers to strictly preserve "no two-wide".
  */
@@ -279,6 +329,13 @@ export function analyzeAndFixDeadEnds(intGrid: IntGrid, ctx: AnalyzerContext, fi
       if (tryExtendCorridor(tip, intGrid, ctx)) {
         changed = true;
       }
+    }
+
+    fixDoubleWide(intGrid);
+
+    // Corner-bridge pass to connect near-miss corridors without 2x2s
+    if (fillCornerBridges(intGrid, ctx)) {
+      changed = true;
     }
 
     fixDoubleWide(intGrid);
