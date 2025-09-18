@@ -68,6 +68,9 @@ export class HeIsComingGenerator {
         // Post-processing: Remove two-wide paths
         this.fixDoubleWidePaths(intGrid);
 
+        // Analyze and fix dead-ends before returning
+        this.analyzeAndFixDeadEnds(intGrid);
+
         return intGrid;
     }
 
@@ -456,5 +459,288 @@ export class HeIsComingGenerator {
             [x, y - 1],  // Down
             [x - 1, y]   // Left
         ];
+    }
+
+    // =========================
+    // Dead-end analysis pipeline
+    // =========================
+
+    private readonly TIER1_MIN_EXTENSION = 50; // tiles
+    private readonly TIER3_SEARCH_RADIUS = 40; // tiles
+
+    private analyzeAndFixDeadEnds(intGrid: IntGrid): void {
+        // Run a few passes to converge
+        const maxPasses = 5;
+        for (let pass = 0; pass < maxPasses; pass++) {
+            let changed = false;
+
+            // Find all current dead ends (degree == 1)
+            const deadEnds = this.detectDeadEnds(intGrid);
+            if (deadEnds.length === 0) {
+                break;
+            }
+
+            // Tier 1: Try corridor extension and optional branching
+            for (const tip of deadEnds) {
+                if (this.tryExtendCorridor(tip, intGrid)) {
+                    changed = true;
+                }
+            }
+
+            // Fix any accidental two-wide sections from Tier 1
+            this.fixDoubleWidePaths(intGrid);
+
+            // Recompute dead ends after Tier 1
+            const deadEndsAfterT1 = this.detectDeadEnds(intGrid);
+
+            // Tier 2: Prune very short dead-ends (length 1–5)
+            for (const tip of deadEndsAfterT1) {
+                if (this.pruneShortDeadEnd(tip, intGrid, 1, 5)) {
+                    changed = true;
+                }
+            }
+
+            // Fix again to preserve no two-wide rule
+            this.fixDoubleWidePaths(intGrid);
+
+            // Recompute dead ends after Tier 2
+            const deadEndsAfterT2 = this.detectDeadEnds(intGrid);
+
+            // Tier 3: Last resort, forcefully connect remaining
+            for (const tip of deadEndsAfterT2) {
+                if (this.forceConnectDeadEnd(tip, intGrid)) {
+                    changed = true;
+                }
+            }
+
+            // Final two-wide cleanup for this pass
+            this.fixDoubleWidePaths(intGrid);
+
+            if (!changed) {
+                break;
+            }
+        }
+    }
+
+    private detectDeadEnds(intGrid: IntGrid): [number, number][] {
+        const tips: [number, number][] = [];
+        for (let x = 0; x < this.levelSize[0]; x++) {
+            for (let y = 0; y < this.levelSize[1]; y++) {
+                if (intGrid.getTile(x, y) !== this.PATH_TILE) continue;
+                if (this.countPathConnections([x, y], intGrid) === 1) {
+                    tips.push([x, y]);
+                }
+            }
+        }
+        return tips;
+    }
+
+    private getPathNeighbors(pos: [number, number], intGrid: IntGrid): [number, number][] {
+        const res: [number, number][] = [];
+        for (const n of this.getNeighbors(pos)) {
+            if (
+                n[0] >= 0 && n[0] < this.levelSize[0] &&
+                n[1] >= 0 && n[1] < this.levelSize[1] &&
+                intGrid.getTile(n[0], n[1]) === this.PATH_TILE
+            ) {
+                res.push(n);
+            }
+        }
+        return res;
+    }
+
+    private getDeadEndDirection(tip: [number, number], intGrid: IntGrid): [number, number] | null {
+        const neighbors = this.getPathNeighbors(tip, intGrid);
+        if (neighbors.length !== 1) return null;
+        const n = neighbors[0];
+        return [tip[0] - n[0], tip[1] - n[1]] as [number, number];
+    }
+
+    private inBounds(pos: [number, number]): boolean {
+        return (
+            pos[0] >= 0 && pos[0] < this.levelSize[0] &&
+            pos[1] >= 0 && pos[1] < this.levelSize[1]
+        );
+    }
+
+    private wouldCreateDoubleWideAt(pos: [number, number], intGrid: IntGrid): boolean {
+        const [x, y] = pos;
+        // Check four possible 2x2 squares around (x,y)
+        for (let ox = -1; ox <= 0; ox++) {
+            for (let oy = -1; oy <= 0; oy++) {
+                const cells: [number, number][] = [
+                    [x + ox, y + oy],
+                    [x + ox + 1, y + oy],
+                    [x + ox, y + oy + 1],
+                    [x + ox + 1, y + oy + 1],
+                ];
+                let count = 0;
+                for (const c of cells) {
+                    if (!this.inBounds(c)) { count = -100; break; }
+                    if (c[0] === x && c[1] === y) {
+                        count++;
+                    } else if (intGrid.getTile(c[0], c[1]) === this.PATH_TILE) {
+                        count++;
+                    }
+                }
+                if (count === 4) return true;
+            }
+        }
+        return false;
+    }
+
+    private tryExtendCorridor(tip: [number, number], intGrid: IntGrid): boolean {
+        const dir = this.getDeadEndDirection(tip, intGrid);
+        if (!dir) return false;
+
+        const pathToPlace: [number, number][] = [];
+        let connected = false;
+        let current: [number, number] = [tip[0] + dir[0], tip[1] + dir[1]];
+
+        for (let step = 1; step <= this.TIER1_MIN_EXTENSION; step++) {
+            if (!this.inBounds(current)) break;
+
+            const tile = intGrid.getTile(current[0], current[1]);
+            if (tile === this.PATH_TILE) {
+                // Reached another corridor
+                connected = true;
+                break;
+            }
+
+            // Avoid creating 2x2 blocks
+            if (this.wouldCreateDoubleWideAt(current, intGrid)) break;
+
+            pathToPlace.push([current[0], current[1]]);
+
+            // Occasional chance to branch off perpendicular while extending
+            if (!connected && Math.random() < 0.12) {
+                const branched = this.tryBranchFrom(current, dir, intGrid, 20 + Math.floor(Math.random() * 15));
+                if (branched) {
+                    connected = true;
+                }
+            }
+
+            // Advance straight
+            current = [current[0] + dir[0], current[1] + dir[1]];
+        }
+
+        // Commit
+        for (const p of pathToPlace) {
+            if (this.inBounds(p)) intGrid.setTile(p[0], p[1], this.PATH_TILE);
+        }
+        return connected;
+    }
+
+    private tryBranchFrom(origin: [number, number], forwardDir: [number, number], intGrid: IntGrid, maxSteps: number): boolean {
+        // Two perpendicular directions
+        const perps: [number, number][] =
+            (forwardDir[0] !== 0)
+                ? [[0, 1], [0, -1]]
+                : [[1, 0], [-1, 0]];
+        // Randomize order
+        if (Math.random() < 0.5) perps.reverse();
+
+        for (const dir of perps) {
+            let curr: [number, number] = [origin[0] + dir[0], origin[1] + dir[1]];
+            const branch: [number, number][] = [];
+            for (let i = 0; i < maxSteps; i++) {
+                if (!this.inBounds(curr)) break;
+                const t = intGrid.getTile(curr[0], curr[1]);
+                if (t === this.PATH_TILE) {
+                    // Found a connection
+                    for (const p of branch) intGrid.setTile(p[0], p[1], this.PATH_TILE);
+                    return true;
+                }
+                if (this.wouldCreateDoubleWideAt(curr, intGrid)) break;
+                branch.push([curr[0], curr[1]]);
+                curr = [curr[0] + dir[0], curr[1] + dir[1]];
+            }
+        }
+        return false;
+    }
+
+    private pruneShortDeadEnd(tip: [number, number], intGrid: IntGrid, minLen: number, maxLen: number): boolean {
+        const inward = this.getPathNeighbors(tip, intGrid);
+        if (inward.length !== 1) return false; // not a dead end
+
+        const corridor: [number, number][] = [tip];
+        let prev: [number, number] = tip;
+        let curr: [number, number] = inward[0];
+
+        while (true) {
+            corridor.push(curr);
+            const nbs = this.getPathNeighbors(curr, intGrid);
+            if (nbs.length !== 2) break; // reached junction or another end
+            const next = (nbs[0][0] === prev[0] && nbs[0][1] === prev[1]) ? nbs[1] : nbs[0];
+            prev = curr;
+            curr = next;
+            if (!this.inBounds(curr) || corridor.length > 1000) break;
+        }
+
+        if (corridor.length >= minLen && corridor.length <= maxLen) {
+            for (const p of corridor) intGrid.setTile(p[0], p[1], this.REGION_TILE);
+            return true;
+        }
+        return false;
+    }
+
+    private forceConnectDeadEnd(tip: [number, number], intGrid: IntGrid): boolean {
+        const dir = this.getDeadEndDirection(tip, intGrid);
+        if (!dir) return false;
+
+        // Find nearest other PATH tile by raycasting in directions except back towards the corridor
+        const backDir: [number, number] = [-dir[0], -dir[1]]; // direction towards corridor
+        const dirs: [number, number][] = (
+            [[1,0],[-1,0],[0,1],[0,-1]] as [number, number][]
+        ).filter((d: [number, number]) => !(d[0] === backDir[0] && d[1] === backDir[1]));
+
+        let bestTarget: [number, number] | null = null;
+        let bestDist = Number.MAX_SAFE_INTEGER;
+
+        for (const d of dirs) {
+            let curr: [number, number] = [tip[0] + d[0], tip[1] + d[1]];
+            for (let step = 1; step <= this.TIER3_SEARCH_RADIUS; step++) {
+                if (!this.inBounds(curr)) break;
+                if (intGrid.getTile(curr[0], curr[1]) === this.PATH_TILE) {
+                    const dist = Math.abs(curr[0] - tip[0]) + Math.abs(curr[1] - tip[1]);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestTarget = [curr[0], curr[1]];
+                    }
+                    break; // stop in this direction
+                }
+                curr = [curr[0] + d[0], curr[1] + d[1]];
+            }
+        }
+
+        if (!bestTarget) {
+            // As a fallback, scan the whole grid for nearest PATH excluding the immediate neighbor
+            const neighbor = this.getPathNeighbors(tip, intGrid)[0] || null;
+            for (let x = 0; x < this.levelSize[0]; x++) {
+                for (let y = 0; y < this.levelSize[1]; y++) {
+                    if (intGrid.getTile(x, y) !== this.PATH_TILE) continue;
+                    if (neighbor && x === neighbor[0] && y === neighbor[1]) continue;
+                    const dist = Math.abs(x - tip[0]) + Math.abs(y - tip[1]);
+                    if (dist < bestDist) { bestDist = dist; bestTarget = [x, y]; }
+                }
+            }
+        }
+
+        if (!bestTarget) return false;
+
+        // Compute path using existing A* between tip and target
+        const aStarPath = this.findPathSegment(tip, bestTarget, intGrid);
+        if (!aStarPath || aStarPath.length === 0) return false;
+
+        // Place tiles along the path, but skip the starting tile (tip is already PATH)
+        for (let i = 1; i < aStarPath.length; i++) {
+            const p = aStarPath[i];
+            if (this.wouldCreateDoubleWideAt(p, intGrid)) {
+                // Abort if this step violates the rule; try trimming the rest
+                break;
+            }
+            intGrid.setTile(p[0], p[1], this.PATH_TILE);
+        }
+        return true;
     }
 }
