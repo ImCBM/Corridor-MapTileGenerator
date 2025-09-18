@@ -314,6 +314,24 @@ function fillCornerBridges(intGrid: IntGrid, ctx: AnalyzerContext): boolean {
 }
 
 /**
+ * Final cleanup: remove isolated PATH cells (degree == 0). These can appear
+ * after various passes and are visually odd "empty road" tiles with no connections.
+ */
+function removeIsolatedPaths(intGrid: IntGrid, ctx: AnalyzerContext): boolean {
+  let changed = false;
+  for (let x = 0; x < ctx.levelSize[0]; x++) {
+    for (let y = 0; y < ctx.levelSize[1]; y++) {
+      if (intGrid.getTile(x, y) !== ctx.PATH_TILE) continue;
+      if (countPathConnections([x, y], intGrid, ctx) === 0) {
+        intGrid.setTile(x, y, ctx.REGION_TILE);
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
+/**
  * Run the tiered pass a limited number of times until no changes occur.
  * fixDoubleWide() is invoked between tiers to strictly preserve "no two-wide".
  */
@@ -360,4 +378,7 @@ export function analyzeAndFixDeadEnds(intGrid: IntGrid, ctx: AnalyzerContext, fi
 
     if (!changed) break;
   }
+
+  // Final isolated tile scrub (non-iterative): remove any completely lone PATHs
+  removeIsolatedPaths(intGrid, ctx);
 }
