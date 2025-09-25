@@ -2,14 +2,50 @@ import * as Phaser from 'phaser';
 import { HeIsComingGenerator } from './level-generator';
 import { IntGrid } from './data-structures';
 
+/*
+    GameScene
+    ---------
+    Bridges Phaser's rendering loop with the procedural generator.
+
+    Responsibilities:
+        - Hold instance of HeIsComingGenerator and invoke generation on demand.
+        - Render IntGrid as a colored tile map (simple rectangle fills per cell).
+        - Provide basic camera interaction (zoom via wheel, pan via drag) and optional
+            viewport culling to skip drawing off-screen tiles for perf.
+        - Expose public methods triggered by UI (onGenerateButtonClick, onCullingToggle).
+
+    High-level flow when user generates a level:
+        main.ts click handler -> gameScene.onGenerateButtonClick() -> generateLevel()
+        -> generator.generateLayout() -> currentGrid set -> drawGrid().
+
+    Key fields:
+        generator        : Procedural layout builder.
+        currentGrid      : Latest generated IntGrid (null before first generation).
+        graphics         : Phaser Graphics object used for immediate-mode drawing.
+        cellSize         : Pixel size per grid cell (uniform square cells).
+        drawThrottleMs   : Controls max redraw rate during drag to reduce overhead.
+        useViewportCulling: Toggle for partial draw optimization.
+*/
+
 export class GameScene extends Phaser.Scene {
+    // =============================
+    // Tunable Rendering Constants
+    // =============================
+    private static readonly DEFAULT_CELL_SIZE = 12;        // Pixels per tile.
+    private static readonly DRAG_REDRAW_THROTTLE_MS = 16;  // ~60 FPS.
+    private static readonly WHEEL_ZOOM_FACTOR = 0.001;     // Scale wheel delta.
+    private static readonly MIN_ZOOM = 0.1;
+    private static readonly MAX_ZOOM = 3;
+    private static readonly CULL_BUFFER_CELLS = 2;         // Extra tiles beyond viewport each side.
+    private static readonly CAMERA_PADDING = 100;          // Extra world bounds padding around grid.
+
     private generator: HeIsComingGenerator;
     private currentGrid: IntGrid | null = null;
     private graphics!: Phaser.GameObjects.Graphics;
-    private cellSize: number = 12;
+    private cellSize: number = GameScene.DEFAULT_CELL_SIZE;                 // Pixels per grid cell.
     private lastDrawTime: number = 0;
-    private drawThrottleMs: number = 16; // ~60 FPS
-    private useViewportCulling: boolean = true;
+    private drawThrottleMs: number = GameScene.DRAG_REDRAW_THROTTLE_MS;            // ~60 FPS pacing for drag redraw.
+    private useViewportCulling: boolean = true;     // Skip drawing tiles outside camera view.
 
     constructor() {
         super({ key: 'GameScene' });
@@ -17,22 +53,25 @@ export class GameScene extends Phaser.Scene {
     }
 
     create(): void {
-        // Create graphics object for drawing the grid
+        // Single graphics layer reused each draw (cleared & redrawn).
         this.graphics = this.add.graphics();
 
-        // Set up camera controls
+        // Neutral initial zoom (1 = 1:1 pixel per world unit).
         this.cameras.main.setZoom(1);
         
-        // Add mouse wheel zoom
+        // Wheel zoom: adjust zoom, clamp range, request redraw.
         this.input.on('wheel', (pointer: Phaser.Input.Pointer, gameObjects: any[], deltaX: number, deltaY: number) => {
             const zoom = this.cameras.main.zoom;
-            const newZoom = Phaser.Math.Clamp(zoom - deltaY * 0.001, 0.1, 3);
+            const newZoom = Phaser.Math.Clamp(
+                zoom - deltaY * GameScene.WHEEL_ZOOM_FACTOR,
+                GameScene.MIN_ZOOM,
+                GameScene.MAX_ZOOM
+            );
             this.cameras.main.setZoom(newZoom);
-            // Redraw grid after zoom change
             this.drawGrid();
         });
 
-        // Add click and drag to pan
+        // Left mouse drag -> camera pan (pointermove registered only while pressed).
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             if (pointer.leftButtonDown()) {
                 this.input.on('pointermove', this.handleCameraDrag, this);
@@ -41,14 +80,17 @@ export class GameScene extends Phaser.Scene {
 
         this.input.on('pointerup', () => {
             this.input.off('pointermove', this.handleCameraDrag, this);
-            // Redraw grid after pan ends to ensure clean rendering
-            this.drawGrid();
+            this.drawGrid(); // Ensure final crisp frame after drag.
         });
 
-        // Generate initial level
+        // First automatic generation so user sees content immediately.
         this.generateLevel();
     }
 
+    /**
+     * Translate camera by pointer delta (scaled by current zoom so drag feels consistent).
+     * Uses simple throttling to avoid re-rendering more often than drawThrottleMs during drag.
+     */
     private handleCameraDrag(pointer: Phaser.Input.Pointer): void {
         if (pointer.isDown) {
             const deltaX = pointer.x - pointer.prevPosition.x;
@@ -66,6 +108,10 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    /**
+     * Generate a new layout with provided parameters then draw + update UI text.
+     * Parameters default to small example values; UI supplies overrides.
+     */
     generateLevel(width: number = 30, height: number = 20, regions: number = 8, minDistance: number = 3): void {
         try {
             // Update generator settings
@@ -88,6 +134,14 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    /**
+     * Render currentGrid onto the graphics layer.
+     * Steps:
+     *   1. Compute center offset so grid is visually centered.
+     *   2. Optionally compute culling bounds based on camera viewport.
+     *   3. Iterate visible tiles and draw filled rectangles with outline.
+     *   4. Update performance stats + expand camera bounds for smoother panning.
+     */
     private drawGrid(): void {
         if (!this.currentGrid) return;
 
@@ -96,7 +150,7 @@ export class GameScene extends Phaser.Scene {
         const width = this.currentGrid.width;
         const height = this.currentGrid.height;
 
-        // Center the grid in the view
+    // Center the grid in the view (keeps smaller grids aesthetically placed).
         const offsetX = (this.scale.width - width * this.cellSize) / 2;
         const offsetY = (this.scale.height - height * this.cellSize) / 2;
 
@@ -114,7 +168,7 @@ export class GameScene extends Phaser.Scene {
             const viewBottom = ((camera.scrollY + this.scale.height / zoom) - offsetY) / this.cellSize;
 
             // Add buffer around visible area (in grid cells)
-            const buffer = 2;
+            const buffer = GameScene.CULL_BUFFER_CELLS;
             startX = Math.max(0, Math.floor(viewLeft) - buffer);
             endX = Math.min(width - 1, Math.ceil(viewRight) + buffer);
             startY = Math.max(0, Math.floor(viewTop) - buffer);
@@ -125,13 +179,13 @@ export class GameScene extends Phaser.Scene {
         let tilesRendered = 0;
         for (let x = startX; x <= endX; x++) {
             for (let y = startY; y <= endY; y++) {
-                // Convert grid Y to screen Y (flip Y for proper display)
+                // Convert logical grid Y to screen Y (flip so y increases upwards visually).
                 const screenY = (height - 1 - y) * this.cellSize + offsetY;
                 const screenX = x * this.cellSize + offsetX;
 
                 const tileType = this.currentGrid.getTile(x, y);
 
-                // Choose color based on tile type
+                // Color key (match with generator tile constants).
                 let color: number;
                 if (tileType === this.generator.PATH_TILE) {
                     color = 0x90EE90; // Light green for paths
@@ -143,11 +197,11 @@ export class GameScene extends Phaser.Scene {
                     color = 0xF0F0F0; // Light gray for empty
                 }
 
-                // Draw filled rectangle
+                // Filled rect (solid tile body)
                 this.graphics.fillStyle(color);
                 this.graphics.fillRect(screenX, screenY, this.cellSize, this.cellSize);
 
-                // Draw border
+                // Subtle border to aid visual parsing of shapes.
                 this.graphics.lineStyle(1, 0xCCCCCC, 0.3);
                 this.graphics.strokeRect(screenX, screenY, this.cellSize, this.cellSize);
                 
@@ -158,12 +212,14 @@ export class GameScene extends Phaser.Scene {
         // Update performance info
         this.updatePerformanceInfo(tilesRendered, width * height);
 
-        // Update camera bounds to fit the grid
+        // Expand camera bounds around grid with padding to allow some panning freedom.
         const gridWidth = width * this.cellSize;
         const gridHeight = height * this.cellSize;
-        this.cameras.main.setBounds(offsetX - 100, offsetY - 100, gridWidth + 200, gridHeight + 200);
+        const pad = GameScene.CAMERA_PADDING;
+        this.cameras.main.setBounds(offsetX - pad, offsetY - pad, gridWidth + pad * 2, gridHeight + pad * 2);
     }
 
+    /** Display simple connection count summary (called after generation). */
     private updateInfoDisplay(): void {
         const infoElement = document.getElementById('info-text');
         if (infoElement && this.generator.edges) {
@@ -171,6 +227,7 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    /** Update render diagnostics (visible vs total tiles). */
     private updatePerformanceInfo(tilesRendered: number, totalTiles: number): void {
         const infoElement = document.getElementById('info-text');
         if (infoElement && this.generator.edges) {
@@ -179,6 +236,7 @@ export class GameScene extends Phaser.Scene {
         }
     }
 
+    /** Flash error message in info-text area (auto resets color). */
     private showError(message: string): void {
         const infoElement = document.getElementById('info-text');
         if (infoElement) {
@@ -195,6 +253,10 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Method to be called from UI
+    /**
+     * UI callback: Pull parameter inputs from DOM then regenerate.
+     * Acts as boundary between DOM world and Phaser scene internals.
+     */
     public onGenerateButtonClick(): void {
         const widthInput = document.getElementById('width') as HTMLInputElement;
         const heightInput = document.getElementById('height') as HTMLInputElement;
@@ -212,6 +274,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Method to toggle viewport culling from UI
+    /** UI callback: toggle viewport culling & immediate redraw. */
     public onCullingToggle(): void {
         const cullingInput = document.getElementById('culling') as HTMLInputElement;
         this.useViewportCulling = cullingInput.checked;

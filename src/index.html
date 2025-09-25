@@ -18,11 +18,43 @@
             top: 10px;
             left: 10px;
             background: rgba(52, 73, 94, 0.9);
-            padding: 15px;
+            padding: 0;
             border-radius: 8px;
             color: white;
             z-index: 1000;
             min-width: 250px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+            user-select: none;
+        }
+
+        #ui-header {
+            cursor: move;
+            background: #34495e;
+            border-radius: 8px 8px 0 0;
+            padding: 8px 15px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        #collapse-btn {
+            background: none;
+            border: none;
+            color: #ecf0f1;
+            font-size: 18px;
+            cursor: pointer;
+            margin-left: 8px;
+            padding: 0 4px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        #collapse-btn:hover {
+            background: #2c3e50;
+        }
+
+        #ui-content {
+            padding: 15px;
         }
         
         .control-group {
@@ -96,9 +128,13 @@
 </head>
 <body>
     <div id="ui-container">
-        <h3 style="margin: 0 0 15px 0;">Level Generator</h3>
+        <div id="ui-header">
+            <span>Level Generator Menu</span>
+            <button id="collapse-btn" title="Collapse/Expand Menu">&#x25B2;</button>
+        </div>
+        <div id="ui-content">
         
-        <div class="control-group">
+    <div class="control-group">
             <label for="width">Width:</label>
             <input type="number" id="width" min="10" max="100" value="30">
         </div>
@@ -143,11 +179,64 @@
             </div>
         </div>
         
-        <div class="info" id="info-text">
+    <div class="info" id="info-text">
             Click 'Generate Level' to create a new layout
+        </div>
         </div>
     </div>
 
     <div id="game-container"></div>
+    <script>
+    // --- Collapsible and Draggable Menu ---
+    (function() {
+        const uiContainer = document.getElementById('ui-container');
+        const uiHeader = document.getElementById('ui-header');
+        const uiContent = document.getElementById('ui-content');
+        const collapseBtn = document.getElementById('collapse-btn');
+        let collapsed = false;
+
+        // Collapse/expand logic
+        collapseBtn.addEventListener('click', function() {
+            collapsed = !collapsed;
+            if (collapsed) {
+                uiContent.style.display = 'none';
+                collapseBtn.innerHTML = '&#x25BC;';
+                collapseBtn.title = 'Expand Menu';
+            } else {
+                uiContent.style.display = '';
+                collapseBtn.innerHTML = '&#x25B2;';
+                collapseBtn.title = 'Collapse Menu';
+            }
+        });
+
+        // Drag logic
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        uiHeader.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            dragOffsetX = e.clientX - uiContainer.offsetLeft;
+            dragOffsetY = e.clientY - uiContainer.offsetTop;
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            let newX = e.clientX - dragOffsetX;
+            let newY = e.clientY - dragOffsetY;
+            // Clamp to viewport
+            newX = Math.max(0, Math.min(window.innerWidth - uiContainer.offsetWidth, newX));
+            newY = Math.max(0, Math.min(window.innerHeight - uiContainer.offsetHeight, newY));
+            uiContainer.style.left = newX + 'px';
+            uiContainer.style.top = newY + 'px';
+        });
+
+        document.addEventListener('mouseup', function() {
+            isDragging = false;
+            document.body.style.userSelect = '';
+        });
+    })();
+    </script>
 </body>
 </html>

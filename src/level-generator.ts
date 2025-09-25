@@ -3,30 +3,85 @@ import { Point, Edge, PathNode, IntGrid } from './data-structures';
 // Dead-end analysis moved to its own module
 import { analyzeAndFixDeadEnds as runDeadEndAnalyzer, AnalyzerContext } from './deadend-analyzer';
 
+/*
+    HeIsComingGenerator
+    -------------------
+    Orchestrates procedural layout generation on a discrete IntGrid.
+
+    End-to-end pipeline (generateLayout):
+        1. generateRegionPoints()  -> Random region seeds with minimum spacing.
+        2. Delaunay triangulation  -> Connectivity structure of region graph.
+        3. getDelaunayEdges()      -> Unique edges extracted from triangulation triangles.
+        4. sort edges by length    -> Shorter edges encourage local connectivity first.
+        5. For each edge:
+                 - findPath() -> Multi-waypoint A* (adds shape variety) which delegates to findPathSegment().
+                 - Place PATH tiles along returned coordinates.
+        6. fixDoubleWidePaths()    -> Enforce no 2x2 PATH blocks invariant (iterative pruning of one tile per block).
+        7. Dead-end analyzer       -> External tiered remediation (extension, pruning, forced connect, corner bridge, isolated scrub).
+        8. Return final IntGrid    -> Consumed by GameScene.drawGrid().
+
+    Key invariants / constraints:
+        - PATH tiles should not form 2x2 squares (visual preference + corridor feel).
+        - Region tiles remain background (REGION_TILE) except optional center markers (REGION_CENTER_TILE placeholder).
+        - A* cost function mildly favors straightness and re-use of existing PATHs.
+
+    Important public tweak points (currently simple public fields):
+        levelSize, regionCount, minRegionDistance control macro shape/density.
+        The A* weighting (tileCost + direction change cost) affects corridor sinuosity.
+*/
+
 export class HeIsComingGenerator {
+    // =============================
+    // Tunable Generation Constants
+    // =============================
+    // A* pathfinding costs
+    private readonly BASE_TILE_COST = 1.2;          // Nominal movement cost.
+    private readonly EXISTING_PATH_COST = 1.0;      // Prefer reusing existing PATH tiles.
+    private readonly DIRECTION_CHANGE_PENALTY = 0.1;// Added when turning a corner.
+
+    // Waypoint heuristics / thresholds
+    private readonly MIN_WAYPOINT_DISTANCE = 8;     // Manhattan distance below which no waypoints added.
+    private readonly ZIGZAG_MIN_DISTANCE = 15;      // Require longer distance before zigzag style.
+    private readonly STEP_MIDPOINT_JITTER = 2;      // +/- range for step midpoint jitter.
+
+    // Double-wide pruning
+    private readonly MAX_DOUBLE_WIDE_FIX_ITER = 10; // Safety cap for iterative pruning loop.
+
+    // Misc / camera-related (used indirectly by analyzer via context for bounds)
+    // (Left here in case future heuristics depend on size scaling.)
+
+    // Dimensions of generated grid (width, height).
     public levelSize: [number, number] = [50, 50];
+    // Number of region seed points attempted (subject to minRegionDistance pruning).
     public regionCount: number = 15;
+    // Minimum Euclidean distance (approx via squared) between region points.
     public minRegionDistance: number = 4;
 
     // Tile types
-    public readonly PATH_TILE = 1;
-    public readonly REGION_TILE = 2;
-    public readonly REGION_CENTER_TILE = 3;
+    // Tile type constants (mirrored by IntGrid interpretation in draw logic).
+    public readonly PATH_TILE = 1;            // Carved corridor.
+    public readonly REGION_TILE = 2;          // Background / un-carved area.
+    public readonly REGION_CENTER_TILE = 3;   // Optional marker for region seeds (not currently placed).
 
+    // Captured unique edges from triangulation (useful for stats / debug UI).
     public edges: Edge[] = [];
 
+    /**
+     * Primary entry: build and post-process a grid layout.
+     * Returns populated IntGrid (no side-effects outside updating this.edges).
+     */
     generateLayout(): IntGrid {
         this.edges = [];
 
-        // Generate region points
+    // 1) Region seeds with spacing guard.
         const points = this.generateRegionPoints();
 
-        // Create Delaunay triangulation
+        // 2) Compute connectivity via Delaunay triangulation (needs >=3 points).
         if (points.length < 3) {
             throw new Error('Need at least 3 points for triangulation');
         }
 
-        // Convert points to coordinate array for delaunator
+        // Convert points to flat coordinate array (x1,y1,x2,y2,...) for delaunator.
         const coords: number[] = [];
         points.forEach(p => {
             coords.push(p.x, p.y);
@@ -34,32 +89,32 @@ export class HeIsComingGenerator {
 
         const delaunay = new Delaunator(coords);
 
-        // Create grid
+    // 3) Allocate empty IntGrid.
         const intGrid = new IntGrid(this.levelSize[0], this.levelSize[1]);
 
-        // Initialize grid with region tiles
+        // 4) Initialize full grid as REGION (background).
         for (let x = 0; x < this.levelSize[0]; x++) {
             for (let y = 0; y < this.levelSize[1]; y++) {
                 intGrid.setTile(x, y, this.REGION_TILE);
             }
         }
 
-        // Get edges from Delaunay triangulation
+    // 5) Extract unique edges from triangulation triangles.
         const edges = this.getDelaunayEdges(delaunay, points);
 
-        // Sort edges by length (shorter first)
+    // 6) Process shorter edges first -> fosters local clustering before long corridors.
         edges.sort((a, b) => this.edgeLength(a) - this.edgeLength(b));
 
-        // Process edges and create paths
+        // 7) For each edge, carve a path between integer-rounded endpoints.
         for (const edge of edges) {
             this.edges.push(edge);
             const point1: [number, number] = [Math.floor(edge.p.x), Math.floor(edge.p.y)];
             const point2: [number, number] = [Math.floor(edge.q.x), Math.floor(edge.q.y)];
 
-            // Find path between points using A*
+            // Multi-waypoint A* (adds shape variation) fallback to direct path.
             const path = this.findPath(point1, point2, intGrid);
 
-            // Place path tiles
+            // Commit carved path tiles into grid.
             if (path) {
                 for (const pathPoint of path) {
                     intGrid.setTile(pathPoint[0], pathPoint[1], this.PATH_TILE);
@@ -67,14 +122,12 @@ export class HeIsComingGenerator {
             }
         }
 
-        // Post-processing: Remove two-wide paths
+    // 8) Enforce structural invariant (no 2x2 PATH squares) pre dead-end passes.
         this.fixDoubleWidePaths(intGrid);
 
-        // Analyze and fix dead-ends before returning
-        // NOTE: Dead-end tiered analyzer was moved out of this class into `src/deadend-analyzer.ts`.
-        // It used to live here as a set of private methods (analyzeAndFixDeadEnds, detectDeadEnds,
-        // getPathNeighbors, getDeadEndDirection, tryExtendCorridor, tryBranchFrom, pruneShortDeadEnd,
-        // forceConnectDeadEnd). We now build a small context and call the external function.
+        // 9) Dead-end remediation (tiered). External module to keep this class lean.
+        //    Context adapter supplies neighbors / bounds / double-wide guard.
+        //    Pass order inside analyzer: extension + branch -> corner bridge -> prune -> forced connect -> scrub.
         const ctx: AnalyzerContext = {
             PATH_TILE: this.PATH_TILE,
             REGION_TILE: this.REGION_TILE,
@@ -93,6 +146,10 @@ export class HeIsComingGenerator {
         return intGrid;
     }
 
+    /**
+     * Randomly sample region seed points subject to a minimum pairwise distance.
+     * Simple rejection sampling capped by attempts. Returns unique list.
+     */
     private generateRegionPoints(): Point[] {
         const points: Point[] = [];
         let attempts = 0;
@@ -121,6 +178,10 @@ export class HeIsComingGenerator {
         return points;
     }
 
+    /**
+     * Convert triangle index buffer into a unique undirected edge list.
+     * Uses a Set of sorted index pairs to de-duplicate.
+     */
     private getDelaunayEdges(delaunay: Delaunator<number[]>, points: Point[]): Edge[] {
         const edges: Edge[] = [];
         const edgeSet = new Set<string>();
@@ -146,10 +207,15 @@ export class HeIsComingGenerator {
         return edges;
     }
 
+    /** Euclidean length used for sorting edges (short-first). */
     private edgeLength(edge: Edge): number {
         return Math.sqrt((edge.q.x - edge.p.x) ** 2 + (edge.q.y - edge.p.y) ** 2);
     }
 
+    /**
+     * Attempt multi-segment path using generated waypoints for shape variety.
+     * Falls back to a single-segment A* if any waypoint segment fails.
+     */
     private findPath(start: [number, number], end: [number, number], intGrid: IntGrid): [number, number][] | null {
         // First try to find path with waypoints for more interesting shapes
         const waypoints = this.generateWaypoints(start, end);
@@ -178,6 +244,10 @@ export class HeIsComingGenerator {
         return fullPath.length > 0 ? fullPath : null;
     }
 
+    /**
+     * Heuristic waypoint generator for stylistic variation.
+     * Styles: L-shape, step, zigzag (selected randomly). Returns zero or more intermediate points.
+     */
     private generateWaypoints(start: [number, number], end: [number, number]): [number, number][] {
         const waypoints: [number, number][] = [];
 
@@ -186,7 +256,7 @@ export class HeIsComingGenerator {
         const distance = Math.abs(dx) + Math.abs(dy);
 
         // Only add waypoints for longer paths
-        if (distance < 8) {
+        if (distance < this.MIN_WAYPOINT_DISTANCE) {
             return waypoints;
         }
 
@@ -209,8 +279,8 @@ export class HeIsComingGenerator {
             let midY = start[1] + Math.floor(dy / 2);
 
             // Add some randomness to the midpoint
-            const offsetX = Math.floor(Math.random() * 5) - 2;
-            const offsetY = Math.floor(Math.random() * 5) - 2;
+            const offsetX = Math.floor(Math.random() * (this.STEP_MIDPOINT_JITTER * 2 + 1)) - this.STEP_MIDPOINT_JITTER;
+            const offsetY = Math.floor(Math.random() * (this.STEP_MIDPOINT_JITTER * 2 + 1)) - this.STEP_MIDPOINT_JITTER;
 
             midX = Math.max(0, Math.min(this.levelSize[0] - 1, midX + offsetX));
             midY = Math.max(0, Math.min(this.levelSize[1] - 1, midY + offsetY));
@@ -220,7 +290,7 @@ export class HeIsComingGenerator {
             waypoints.push([end[0], midY]);   // Horizontal to end
         } else if (pathStyle === 'zigzag') {
             // Create zigzag pattern for longer paths
-            if (distance > 15) {
+            if (distance > this.ZIGZAG_MIN_DISTANCE) {
                 const thirdX = start[0] + Math.floor(dx / 3);
                 const twoThirdX = start[0] + Math.floor(2 * dx / 3);
                 const thirdY = start[1] + Math.floor(dy / 3);
@@ -236,6 +306,13 @@ export class HeIsComingGenerator {
         return waypoints;
     }
 
+    /**
+     * Core A* pathfinder between two points on a grid.
+     * Cost model:
+     *   Base tile cost ~1.2 (slightly >1) but existing PATH tiles cost 1.0 to encourage reuse.
+     *   Direction change penalty 0.1 to mildly prefer straighter corridors.
+     * Returns sequence including start & end or null if unreachable.
+     */
     private findPathSegment(start: [number, number], end: [number, number], intGrid: IntGrid): [number, number][] | null {
         const openSet: PathNode[] = [];
         const closedSet = new Set<string>();
@@ -272,9 +349,9 @@ export class HeIsComingGenerator {
                 }
 
                 // Calculate G cost with preference for straight lines
-                let tileCost = 1.2;
+                let tileCost = this.BASE_TILE_COST;
                 if (intGrid.getTile(neighborPos[0], neighborPos[1]) === this.PATH_TILE) {
-                    tileCost = 1.0; // Prefer existing paths
+                    tileCost = this.EXISTING_PATH_COST; // Prefer existing paths
                 }
 
                 // Add slight cost for direction changes to encourage straighter paths
@@ -309,6 +386,7 @@ export class HeIsComingGenerator {
         return null;
     }
 
+    /** Small penalty if movement direction changes between steps (straight-line bias). */
     private getDirectionChangeCost(prevPos: [number, number], currPos: [number, number], nextPos: [number, number]): number {
         const prevDir = [currPos[0] - prevPos[0], currPos[1] - prevPos[1]];
         const nextDir = [nextPos[0] - currPos[0], nextPos[1] - currPos[1]];
@@ -319,13 +397,17 @@ export class HeIsComingGenerator {
         }
 
         // Small penalty for direction change
-        return 0.1;
+    return this.DIRECTION_CHANGE_PENALTY;
     }
 
+    /**
+     * Iteratively detect 2x2 PATH clusters and remove a single tile chosen to minimally
+     * impact connectivity (fewest external connections heuristic). Prevents wide corridors.
+     */
     private fixDoubleWidePaths(intGrid: IntGrid): void {
         let changesMade = true;
         let iterations = 0;
-        const maxIterations = 10; // Prevent infinite loops
+    const maxIterations = this.MAX_DOUBLE_WIDE_FIX_ITER; // Prevent infinite loops
 
         while (changesMade && iterations < maxIterations) {
             changesMade = false;
@@ -343,6 +425,7 @@ export class HeIsComingGenerator {
         }
     }
 
+    /** Scan grid for all 2x2 PATH blocks. */
     private findDoubleWideBlocks(intGrid: IntGrid): [number, number][][] {
         const blocks: [number, number][][] = [];
 
@@ -363,6 +446,10 @@ export class HeIsComingGenerator {
         return blocks;
     }
 
+    /**
+     * Choose a PATH tile inside a 2x2 block to revert to REGION.
+     * Prefers lower external degree while trying not to sever straight corridor continuity.
+     */
     private fixSingleDoubleWideBlock(block: [number, number][], intGrid: IntGrid): boolean {
         // Count connections for each position in the block
         const connectionCounts: Array<{ pos: [number, number], connections: number }> = [];
@@ -397,6 +484,7 @@ export class HeIsComingGenerator {
         return false;
     }
 
+    /** Degree (PATH neighbor count) ignoring excluded positions (e.g., internal block tiles). */
     private countPathConnections(pos: [number, number], intGrid: IntGrid, excludePositions: Set<string> = new Set()): number {
         let count = 0;
         for (const neighbor of this.getNeighbors(pos)) {
@@ -412,6 +500,10 @@ export class HeIsComingGenerator {
         return count;
     }
 
+    /**
+     * Heuristic safeguard against removing tiles that likely maintain corridor continuity.
+     * Not a full graph connectivity check (for performance) but catches obvious straight links.
+     */
     private wouldDisconnectNetwork(pos: [number, number], intGrid: IntGrid, block: [number, number][]): boolean {
         // Simplified check - in a full implementation, you might want to do
         // a more thorough connectivity analysis
@@ -454,6 +546,7 @@ export class HeIsComingGenerator {
         return false;
     }
 
+    /** Rebuild path list from end node by following parent links to root. */
     private reconstructPath(endNode: PathNode): [number, number][] {
         const path: [number, number][] = [];
         let currentNode: PathNode | null = endNode;
@@ -466,10 +559,12 @@ export class HeIsComingGenerator {
         return path;
     }
 
+    /** Manhattan distance heuristic (suits 4-connected grid). */
     private getHeuristic(a: [number, number], b: [number, number]): number {
         return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
     }
 
+    /** 4-connected neighbor generator (Up, Right, Down, Left). */
     private getNeighbors(pos: [number, number]): [number, number][] {
         const [x, y] = pos;
         return [
@@ -487,6 +582,7 @@ export class HeIsComingGenerator {
     // extracted to `src/deadend-analyzer.ts` to keep this class focused on core generation.
     // The following helpers remain because they're used by the external analyzer via context.
 
+    /** Bounds check helper used by analyzer context and internal loops. */
     private inBounds(pos: [number, number]): boolean {
         return (
             pos[0] >= 0 && pos[0] < this.levelSize[0] &&
@@ -494,6 +590,10 @@ export class HeIsComingGenerator {
         );
     }
 
+    /**
+     * Test if turning (pos) into PATH would complete any 2x2 square of PATH tiles.
+     * Checks four candidate 2x2 windows that could include this position.
+     */
     private wouldCreateDoubleWideAt(pos: [number, number], intGrid: IntGrid): boolean {
         const [x, y] = pos;
         // Check four possible 2x2 squares around (x,y)
