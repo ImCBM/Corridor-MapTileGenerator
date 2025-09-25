@@ -46,6 +46,8 @@ export class HeIsComingGenerator {
 
     // Double-wide pruning
     private readonly MAX_DOUBLE_WIDE_FIX_ITER = 10; // Safety cap for iterative pruning loop.
+    private readonly MAX_REGION_POINT_ATTEMPTS = 1000; // Rejection sampling cap for region seeds.
+    private readonly L_SHAPE_FIRST_AXIS_PROB = 0.5;    // Probability horizontal-first in L-shape.
 
     // Misc / camera-related (used indirectly by analyzer via context for bounds)
     // (Left here in case future heuristics depend on size scaling.)
@@ -154,7 +156,7 @@ export class HeIsComingGenerator {
         const points: Point[] = [];
         let attempts = 0;
 
-        while (points.length < this.regionCount && attempts < 1000) {
+    while (points.length < this.regionCount && attempts < this.MAX_REGION_POINT_ATTEMPTS) {
             attempts++;
             const centerX = Math.floor(Math.random() * this.levelSize[0]);
             const centerY = Math.floor(Math.random() * this.levelSize[1]);
@@ -266,7 +268,7 @@ export class HeIsComingGenerator {
 
         if (pathStyle === 'L_shape') {
             // Create L-shaped path
-            if (Math.random() < 0.5) {
+            if (Math.random() < this.L_SHAPE_FIRST_AXIS_PROB) {
                 // Horizontal first, then vertical
                 waypoints.push([end[0], start[1]]);
             } else {

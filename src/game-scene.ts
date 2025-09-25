@@ -38,6 +38,16 @@ export class GameScene extends Phaser.Scene {
     private static readonly MAX_ZOOM = 3;
     private static readonly CULL_BUFFER_CELLS = 2;         // Extra tiles beyond viewport each side.
     private static readonly CAMERA_PADDING = 100;          // Extra world bounds padding around grid.
+    private static readonly DEFAULT_WIDTH = 30;
+    private static readonly DEFAULT_HEIGHT = 20;
+    private static readonly DEFAULT_REGIONS = 8;
+    private static readonly DEFAULT_MIN_REGION_DIST = 3;
+    private static readonly COLOR_PATH = 0x90EE90;
+    private static readonly COLOR_REGION = 0x8B4513;
+    private static readonly COLOR_REGION_CENTER = 0xFF0000;
+    private static readonly COLOR_EMPTY = 0xF0F0F0;
+    private static readonly STROKE_COLOR = 0xCCCCCC;
+    private static readonly STROKE_ALPHA = 0.3;
 
     private generator: HeIsComingGenerator;
     private currentGrid: IntGrid | null = null;
@@ -84,7 +94,12 @@ export class GameScene extends Phaser.Scene {
         });
 
         // First automatic generation so user sees content immediately.
-        this.generateLevel();
+        this.generateLevel(
+            GameScene.DEFAULT_WIDTH,
+            GameScene.DEFAULT_HEIGHT,
+            GameScene.DEFAULT_REGIONS,
+            GameScene.DEFAULT_MIN_REGION_DIST
+        );
     }
 
     /**
@@ -109,10 +124,27 @@ export class GameScene extends Phaser.Scene {
     }
 
     /**
-     * Generate a new layout with provided parameters then draw + update UI text.
-     * Parameters default to small example values; UI supplies overrides.
+     * Generate a new procedural layout and render it.
+     *
+     * Parameters (all have defaults so UI calls can omit some values):
+     *  - width: horizontal tile count of the level grid.
+     *  - height: vertical tile count of the level grid.
+     *  - regions: number of region seed points to scatter prior to triangulation.
+     *  - minDistance: enforced minimum Manhattan (or near) spacing between region seeds
+     *      to reduce clustering and encourage coverage.
+     *
+     * Side Effects:
+     *  - Mutates generator settings (levelSize, regionCount, minRegionDistance).
+     *  - Replaces currentGrid with a freshly generated `IntGrid`.
+     *  - Triggers a redraw (drawGrid) and updates UI info text.
+     *  - On error, logs to console and displays a temporary user-facing message.
      */
-    generateLevel(width: number = 30, height: number = 20, regions: number = 8, minDistance: number = 3): void {
+    generateLevel(
+        width: number = GameScene.DEFAULT_WIDTH,
+        height: number = GameScene.DEFAULT_HEIGHT,
+        regions: number = GameScene.DEFAULT_REGIONS,
+        minDistance: number = GameScene.DEFAULT_MIN_REGION_DIST
+    ): void {
         try {
             // Update generator settings
             this.generator.levelSize = [width, height];
@@ -188,13 +220,13 @@ export class GameScene extends Phaser.Scene {
                 // Color key (match with generator tile constants).
                 let color: number;
                 if (tileType === this.generator.PATH_TILE) {
-                    color = 0x90EE90; // Light green for paths
+                    color = GameScene.COLOR_PATH; // Light green for paths
                 } else if (tileType === this.generator.REGION_TILE) {
-                    color = 0x8B4513; // Brown for regions
+                    color = GameScene.COLOR_REGION; // Brown for regions
                 } else if (tileType === this.generator.REGION_CENTER_TILE) {
-                    color = 0xFF0000; // Red for region centers
+                    color = GameScene.COLOR_REGION_CENTER; // Red for region centers
                 } else {
-                    color = 0xF0F0F0; // Light gray for empty
+                    color = GameScene.COLOR_EMPTY; // Light gray for empty
                 }
 
                 // Filled rect (solid tile body)
@@ -202,7 +234,7 @@ export class GameScene extends Phaser.Scene {
                 this.graphics.fillRect(screenX, screenY, this.cellSize, this.cellSize);
 
                 // Subtle border to aid visual parsing of shapes.
-                this.graphics.lineStyle(1, 0xCCCCCC, 0.3);
+                this.graphics.lineStyle(1, GameScene.STROKE_COLOR, GameScene.STROKE_ALPHA);
                 this.graphics.strokeRect(screenX, screenY, this.cellSize, this.cellSize);
                 
                 tilesRendered++;

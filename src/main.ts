@@ -36,13 +36,18 @@ import { GameScene } from './game-scene';
 // Tunable timing & UX constants
 const SCENE_BOOT_DELAY_MS = 100;   // Delay before grabbing scene reference.
 const GENERATION_DEFER_MS = 10;    // Short defer to let UI repaint before heavy work.
+const BG_COLOR = '#2c3e50';        // Game background color (also referenced in config).
+const BTN_TEXT_IDLE = 'Generate Level';
+const BTN_TEXT_BUSY = 'Generating...';
+const INFO_COLOR_NORMAL = '#bdc3c7';
+const INFO_COLOR_ERROR = '#e74c3c';
 
 const config: Phaser.GameConfig = {
     type: Phaser.AUTO,                 // Let Phaser pick WebGL or Canvas
     width: window.innerWidth,          // Initial width = current window
     height: window.innerHeight,        // Initial height = current window
     parent: 'game-container',          // DOM element that hosts the <canvas>
-    backgroundColor: '#2c3e50',        // Dark slate style background
+    backgroundColor: BG_COLOR,          // Dark slate style background
     scene: [GameScene]                 // Array so we can extend with more scenes later
 };
 
@@ -70,12 +75,12 @@ function setupUI(): void {
 
             // Optimistic UI lock: prevent double clicks / rapid spamming.
             generateButton.setAttribute('disabled', 'true');
-            generateButton.textContent = 'Generating...';
+            generateButton.textContent = BTN_TEXT_BUSY;
 
             // Neutralize prior error color if any.
             const infoElement = document.getElementById('info-text');
             if (infoElement) {
-                infoElement.style.color = '#bdc3c7';
+                infoElement.style.color = INFO_COLOR_NORMAL;
             }
 
             // Small timeout ensures repaint before heavy generation (avoid perceived freeze).
@@ -86,12 +91,12 @@ function setupUI(): void {
                     console.error('Generation error:', error);
                     if (infoElement) {
                         infoElement.textContent = 'Generation failed. Please try different settings.';
-                        infoElement.style.color = '#e74c3c';
+                        infoElement.style.color = INFO_COLOR_ERROR;
                     }
                 } finally {
                     // Always restore button state.
                     generateButton.removeAttribute('disabled');
-                    generateButton.textContent = 'Generate Level';
+                    generateButton.textContent = BTN_TEXT_IDLE;
                 }
             }, GENERATION_DEFER_MS);
         });

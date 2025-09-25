@@ -48,27 +48,38 @@ export interface AnalyzerContext {
 // TUNING KNOBS (grouped near top)
 // ------------------------------------------------------------------
 // Analyzer iterations
+// Upper bound on full multi-tier passes. Higher = more chances to reduce dead ends
+// but with diminishing returns and extra CPU. Typical grids converge well before this.
 const MAX_ANALYZER_PASSES = 15;
 
 // Tier 1: Minimum straight extension probe length (tiles) before giving up.
-// Larger values probe farther ahead before switching strategies.
+// Larger values aggressively search for distant corridor connections, at the cost
+// of carving more speculative straight segments that may later persist if not pruned.
 const TIER1_MIN_EXTENSION = 50;
 
 // Tier 1 branching behavior
-const BRANCH_PROBABILITY = 0.12; // chance to try a perpendicular branch per step
-const BRANCH_STEPS_BASE = 20;    // base max steps for a branch
-const BRANCH_STEPS_VARIATION = 15; // random variation added to base
-// If a perpendicular branch carves at least this many tiles before hitting a 2x2 guard,
-// keep it even if it didn't reach another corridor (soft success to reduce nubs).
+// BRANCH_PROBABILITY: per straight-step chance to attempt one perpendicular branch.
+// BRANCH_STEPS_BASE / VARIATION: length budget for the candidate branch (uniform variation).
+// BRANCH_SOFT_MIN_KEEP: retain a partial branch of at least this length even if it failed to
+//   connect (because it was blocked by double-wide guard) to smooth out tiny 1-length nubs.
+const BRANCH_PROBABILITY = 0.12;
+const BRANCH_STEPS_BASE = 20;
+const BRANCH_STEPS_VARIATION = 15;
 const BRANCH_SOFT_MIN_KEEP = 2;
 
 // Tier 2 pruning bounds (spur lengths inclusive)
+// Remove spurs whose corridor-only length (excluding junction) falls inside this range.
+// NOTE: Setting PRUNE_MAX_LEN lower than BRANCH_SOFT_MIN_KEEP may reintroduce short nubs.
 const PRUNE_MIN_LEN = 1;
 const PRUNE_MAX_LEN = 5;
 
 // Tier 3: Max Manhattan search radius when raycasting for nearby corridors.
-// Increasing this can connect more distant corridors but may be slower.
+// Larger radius increases probability of a direct straight-line capture before
+// falling back to a full-grid nearest scan.
 const TIER3_SEARCH_RADIUS = 140;
+// Safety guard when tracing a spur to avoid pathological loops (should never hit
+// in a correctly formed acyclic spur, but defensive for future algorithm changes).
+const SPUR_TRACE_LIMIT = 1000;
 
 /** Return 4-neighbors of pos that are PATH tiles. */
 function getPathNeighbors(pos: Pos, intGrid: IntGrid, ctx: AnalyzerContext): Pos[] {
@@ -240,7 +251,7 @@ function pruneShortDeadEnd(tip: Pos, intGrid: IntGrid, ctx: AnalyzerContext, min
     const next = (nbs[0][0] === prev[0] && nbs[0][1] === prev[1]) ? nbs[1] : nbs[0];
     prev = curr;
     curr = next;
-    if (!ctx.inBounds(curr) || spur.length > 1000) break;
+  if (!ctx.inBounds(curr) || spur.length > SPUR_TRACE_LIMIT) break;
   }
 
   if (spur.length >= minLen && spur.length <= maxLen) {
