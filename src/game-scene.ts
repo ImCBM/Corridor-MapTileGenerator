@@ -1,6 +1,7 @@
 import * as Phaser from 'phaser';
 import { HeIsComingGenerator } from './level-generator';
 import { IntGrid } from './data-structures';
+import { OuterTileMarker } from './outer-tile-marker';
 
 /*
     GameScene
@@ -38,11 +39,12 @@ export class GameScene extends Phaser.Scene {
     private static readonly MAX_ZOOM = 3;
     private static readonly CULL_BUFFER_CELLS = 2;         // Extra tiles beyond viewport each side.
     private static readonly CAMERA_PADDING = 100;          // Extra world bounds padding around grid.
-    private static readonly DEFAULT_WIDTH = 30;
-    private static readonly DEFAULT_HEIGHT = 20;
-    private static readonly DEFAULT_REGIONS = 8;
+    private static readonly DEFAULT_WIDTH = 50;
+    private static readonly DEFAULT_HEIGHT = 50;
+    private static readonly DEFAULT_REGIONS = 0; // 0 means auto-calculate as width*height
     private static readonly DEFAULT_MIN_REGION_DIST = 3;
     private static readonly COLOR_PATH = 0x90EE90;
+    private static readonly COLOR_PATH_OUTSIDE = 0x228B22; // Darker green for outside intersections
     private static readonly COLOR_REGION = 0x8B4513;
     private static readonly COLOR_REGION_CENTER = 0xFF0000;
     private static readonly COLOR_EMPTY = 0xF0F0F0;
@@ -146,9 +148,12 @@ export class GameScene extends Phaser.Scene {
         minDistance: number = GameScene.DEFAULT_MIN_REGION_DIST
     ): void {
         try {
+            // Auto-calculate regions if set to 0
+            const finalRegions = regions === 0 ? width * height : regions;
+            
             // Update generator settings
             this.generator.levelSize = [width, height];
-            this.generator.regionCount = regions;
+            this.generator.regionCount = finalRegions;
             this.generator.minRegionDistance = minDistance;
 
             // Generate the grid
@@ -220,7 +225,12 @@ export class GameScene extends Phaser.Scene {
                 // Color key (match with generator tile constants).
                 let color: number;
                 if (tileType === this.generator.PATH_TILE) {
-                    color = GameScene.COLOR_PATH; // Light green for paths
+                    // Check if this is an outside intersection or corner
+                    if (OuterTileMarker.isOutsideIntersectionOrCorner(x, y, this.currentGrid, this.generator.PATH_TILE)) {
+                        color = GameScene.COLOR_PATH_OUTSIDE; // Darker green for outside intersections/corners
+                    } else {
+                        color = GameScene.COLOR_PATH; // Light green for normal paths
+                    }
                 } else if (tileType === this.generator.REGION_TILE) {
                     color = GameScene.COLOR_REGION; // Brown for regions
                 } else if (tileType === this.generator.REGION_CENTER_TILE) {
@@ -296,10 +306,10 @@ export class GameScene extends Phaser.Scene {
         const distanceInput = document.getElementById('distance') as HTMLInputElement;
         const cullingInput = document.getElementById('culling') as HTMLInputElement;
 
-        const width = parseInt(widthInput.value) || 30;
-        const height = parseInt(heightInput.value) || 20;
-        const regions = parseInt(regionsInput.value) || 8;
-        const distance = parseInt(distanceInput.value) || 3;
+        const width = parseInt(widthInput.value) || GameScene.DEFAULT_WIDTH;
+        const height = parseInt(heightInput.value) || GameScene.DEFAULT_HEIGHT;
+        const regions = parseInt(regionsInput.value) || GameScene.DEFAULT_REGIONS; // 0 triggers auto-calculation
+        const distance = parseInt(distanceInput.value) || GameScene.DEFAULT_MIN_REGION_DIST;
         this.useViewportCulling = cullingInput.checked;
 
         this.generateLevel(width, height, regions, distance);

@@ -38,7 +38,7 @@ module.exports = (env, argv) => {
         directory: path.join(__dirname, 'dist'),
       },
       compress: true,
-      port: 3000,
+      port: 3011, // Change this to your desired port
       hot: true,
     },
     devtool: isDevelopment ? 'eval-source-map' : 'source-map',
