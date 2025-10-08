@@ -144,10 +144,12 @@
             <input type="number" id="height" min="10" max="100" value="50">
         </div>
         
-        <div class="control-group">
-            <label for="regions">Regions:</label>
+        <div class="control-group" style="display: flex; align-items: center; gap: 6px;">
+            <label for="regions" style="margin-bottom:0;">Regions:</label>
             <input type="number" id="regions" min="0" max="5000" value="0" placeholder="0 = auto (width × height)">
-        </div>        <div class="control-group">
+            <span id="regions-default-info" style="display:none;color:#aaa;font-style:italic;font-size:11px;margin-left:4px;"></span>
+        </div>
+        <div class="control-group">
             <label for="distance">Min Distance:</label>
             <input type="number" id="distance" min="1" max="10" value="3">
         </div>
@@ -168,6 +170,10 @@
                 <span>Path</span>
             </div>
             <div class="legend-item">
+                <div class="legend-color" style="background-color: #228B22;"></div>
+                <span>Outer</span>
+            </div>
+            <div class="legend-item">
                 <div class="legend-color" style="background-color: #8B4513;"></div>
                 <span>Region</span>
             </div>
@@ -180,11 +186,35 @@
     <div class="info" id="info-text">
             Click 'Generate Level' to create a new layout
         </div>
+    <!-- regions-default-info moved beside input above -->
         </div>
     </div>
 
     <div id="game-container"></div>
     <script>
+    // --- Show faded/grey default region count when regions is 0 ---
+    (function() {
+        const regionsInput = document.getElementById('regions');
+        const widthInput = document.getElementById('width');
+        const heightInput = document.getElementById('height');
+        const defaultInfo = document.getElementById('regions-default-info');
+        function updateDefaultInfo() {
+            const regions = parseInt(regionsInput.value);
+            const width = parseInt(widthInput.value);
+            const height = parseInt(heightInput.value);
+            if (regions === 0 && width && height) {
+                defaultInfo.style.display = '';
+                defaultInfo.textContent = `Default: ${width * height} (width × height)`;
+            } else {
+                defaultInfo.style.display = 'none';
+                defaultInfo.textContent = '';
+            }
+        }
+        regionsInput.addEventListener('input', updateDefaultInfo);
+        widthInput.addEventListener('input', updateDefaultInfo);
+        heightInput.addEventListener('input', updateDefaultInfo);
+        updateDefaultInfo();
+    })();
     // --- Collapsible and Draggable Menu ---
     (function() {
         const uiContainer = document.getElementById('ui-container');
