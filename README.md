@@ -1,6 +1,6 @@
-# Procedural Level Generator - TypeScript + Phaser.js
+# Corridor-MapTileGenerator: Procedural Level Generator - TypeScript + Phaser.js
 
-A TypeScript and Phaser.js port of the Python procedural level generator. This application generates dungeon-like layouts using Delaunay triangulation and A* pathfinding.
+A TypeScript + Phaser.js sandbox for iterating on grid-based maze and dungeon layouts. The toolkit evolved from an internal prototype and is now public so you can fork it, plug it into your own game, or simply harvest layouts.
 
 ## Features
 
@@ -10,6 +10,16 @@ A TypeScript and Phaser.js port of the Python procedural level generator. This a
 - **Interactive UI**: Real-time parameter adjustment and level regeneration
 - **Zoom & Pan**: Mouse controls for exploring generated levels
 - **Post-processing**: Removes double-wide paths for cleaner layouts
+- **Outer Path Highlights**: Automatically marks border intersections and corners so you can spot outer loops at a glance
+
+## Generation Pipeline
+
+1. **Seed Placement (`level-generator.ts`)** – `generateRegionPoints()` samples region centers with a minimum-distance rule so rooms are evenly distributed across the `IntGrid`.
+2. **Triangulation & Edge Ordering** – Delaunator builds a Delaunay mesh, `getDelaunayEdges()` extracts unique edges, and they are sorted shortest-first to favor local corridors before spanning ones.
+3. **Corridor Carving (`findPath`)** – Each edge drives a multi-waypoint A* search that sculpts PATH tiles into the grid. Straightness, existing paths, and random waypoints influence the shapes.
+4. **Structural Cleanup (`fixDoubleWidePaths`)** – Iteratively removes any 2×2 PATH blocks so corridors stay one tile wide.
+5. **Dead-End Analysis (`deadend-analyzer.ts`)** – A staged pass extends promising branches, bridges corners, prunes lingering dead-ends, and reconnects isolated pockets. It reuses the generator’s pathfinder and double-wide guard.
+6. **Rendering & Highlighting (`game-scene.ts`)** – After the grid stabilizes, `GameScene.drawGrid()` paints tiles and calls `OuterTileMarker.isOutsideIntersectionOrCorner()` to flag notable border corners/intersections. The UI simultaneously shows the implicit `width × height` region count when the Regions field is left at `0`.
 
 ## Installation
 
@@ -128,19 +138,6 @@ public levelSize: [number, number] = [50, 50];
 public regionCount: number = 15;
 public minRegionDistance: number = 4;
 ```
-
-## Differences from Python Version
-
-### Improvements
-- **Interactive UI**: Web-based interface instead of desktop GUI
-- **Real-time Interaction**: Zoom, pan, and regenerate without window management
-- **Better Performance**: Optimized rendering with Phaser.js
-- **Cross-platform**: Runs in any modern web browser
-
-### Libraries Used
-- **Delaunator** instead of SciPy for triangulation
-- **Phaser.js** instead of tkinter for UI and rendering
-- **TypeScript** for better code maintainability
 
 ## Browser Compatibility
 
