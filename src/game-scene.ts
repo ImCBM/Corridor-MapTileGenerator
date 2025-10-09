@@ -5,7 +5,7 @@ import { OuterTileMarker } from './map-generation/outer-tile-marker';
 import { Player } from './user-movement/player';
 import { VisibilitySystem } from './user-movement/visibility-system';
 import { GameUI } from './game-UI';
-import { ViewportCulling } from './viewport-culling';
+import { ViewportCulling, CullingMode } from './viewport-culling';
 
 /*
     GameScene
@@ -85,20 +85,24 @@ export class GameScene extends Phaser.Scene {
         this.cameras.main.setZoom(1);
         
         // Wheel zoom: adjust zoom, clamp range, request redraw.
+        // Disabled when fog-of-war culling is active to maintain proper focus area zoom
         this.input.on('wheel', (pointer: Phaser.Input.Pointer, gameObjects: any[], deltaX: number, deltaY: number) => {
-            const zoom = this.cameras.main.zoom;
-            const newZoom = Phaser.Math.Clamp(
-                zoom - deltaY * GameScene.WHEEL_ZOOM_FACTOR,
-                GameScene.MIN_ZOOM,
-                GameScene.MAX_ZOOM
-            );
-            this.cameras.main.setZoom(newZoom);
-            this.drawGrid();
+            if (this.viewportCulling.getCullingMode() !== CullingMode.FOG_OF_WAR) {
+                const zoom = this.cameras.main.zoom;
+                const newZoom = Phaser.Math.Clamp(
+                    zoom - deltaY * GameScene.WHEEL_ZOOM_FACTOR,
+                    GameScene.MIN_ZOOM,
+                    GameScene.MAX_ZOOM
+                );
+                this.cameras.main.setZoom(newZoom);
+                this.drawGrid();
+            }
         });
 
         // Left mouse drag -> camera pan (pointermove registered only while pressed).
+        // Disabled when fog-of-war culling is active to keep camera centered on player
         this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-            if (pointer.leftButtonDown()) {
+            if (pointer.leftButtonDown() && this.viewportCulling.getCullingMode() !== CullingMode.FOG_OF_WAR) {
                 this.input.on('pointermove', this.handleCameraDrag, this);
             }
         });
@@ -122,6 +126,15 @@ export class GameScene extends Phaser.Scene {
         if (this.player && this.player.update()) {
             // Player moved, redraw to update visibility effects
             this.drawGrid();
+        }
+        
+        // Always center camera on player when fog-of-war culling is active
+        if (this.player && this.viewportCulling.getCullingMode() === CullingMode.FOG_OF_WAR && this.currentGrid) {
+            const width = this.currentGrid.width;
+            const height = this.currentGrid.height;
+            const offsetX = (this.scale.width - width * this.cellSize) / 2;
+            const offsetY = (this.scale.height - height * this.cellSize) / 2;
+            this.focusCameraOnPlayer(offsetX, offsetY, height);
         }
     }
 
@@ -223,8 +236,16 @@ export class GameScene extends Phaser.Scene {
             offsetX,
             offsetY,
             this.scale.width,
-            this.scale.height
+            this.scale.height,
+            this.player?.x,
+            this.player?.y,
+            this.visibilitySystem.getMaxTintRadius()
         );
+        
+        // Handle fog-of-war culling camera focusing
+        if (this.viewportCulling.getCullingMode() === CullingMode.FOG_OF_WAR && this.player) {
+            this.focusCameraOnPlayer(offsetX, offsetY, height);
+        }
         
         const startX = cullingBounds.startX;
         const endX = cullingBounds.endX;
@@ -360,6 +381,44 @@ export class GameScene extends Phaser.Scene {
         this.graphics.strokePath();
     }
 
+    /**
+     * Focus camera on player for fog-of-war culling mode
+     * Always keeps the player at the center of the screen
+     */
+    private focusCameraOnPlayer(offsetX: number, offsetY: number, gridHeight: number): void {
+        if (!this.player) return;
+
+        // Convert player grid position to screen position
+        const screenX = this.player.x * this.cellSize + offsetX;
+        const screenY = (gridHeight - 1 - this.player.y) * this.cellSize + offsetY;
+
+        // Calculate focus area size based on fog-of-war settings
+        const maxTintRadius = this.visibilitySystem.getMaxTintRadius();
+        const focusBuffer = this.viewportCulling.getFogOfWarFocusAreaBuffer();
+        const focusRadius = (maxTintRadius + focusBuffer) * this.cellSize;
+
+        // Always center camera on player (center of the player's cell)
+        const centerX = screenX + this.cellSize / 2;
+        const centerY = screenY + this.cellSize / 2;
+        
+        // Force camera to center on player
+        this.cameras.main.centerOn(centerX, centerY);
+
+        // Remove camera bounds to allow free centering
+        this.cameras.main.removeBounds();
+        
+        // Adjust zoom to fit the focus area nicely in the viewport
+        const viewportWidth = this.scale.width;
+        const viewportHeight = this.scale.height;
+        const scaleX = viewportWidth / (focusRadius * 2);
+        const scaleY = viewportHeight / (focusRadius * 2);
+        const targetZoom = Math.min(scaleX, scaleY) * 0.9; // 0.9 to leave some padding
+        
+        // Clamp zoom to reasonable bounds
+        const clampedZoom = Math.max(GameScene.MIN_ZOOM, Math.min(GameScene.MAX_ZOOM, targetZoom));
+        this.cameras.main.setZoom(clampedZoom);
+    }
+
     // Method to be called from UI
     /**
      * UI callback: Pull parameter inputs from DOM then regenerate.
@@ -375,7 +434,8 @@ export class GameScene extends Phaser.Scene {
         
         // Update rendering settings
         this.viewportCulling.setEnabled(this.ui.getCullingChecked());
-        this.viewportCulling.setChunkBasedCulling(this.ui.getChunkCullingChecked());
+        this.viewportCulling.setCullingMode(this.ui.getCullingMode());
+        this.viewportCulling.setFogOfWarFocusAreaBuffer(this.ui.getFogOfWarFocusAreaBuffer());
         
         // Update visibility settings
         this.updateVisibilitySettings();
@@ -399,6 +459,33 @@ export class GameScene extends Phaser.Scene {
     /** UI callback: toggle fog of war & immediate redraw. */
     public onFogOfWarToggle(): void {
         this.visibilitySystem.setEnabled(this.ui.getFogOfWarChecked());
+        this.drawGrid(); // Redraw immediately to show effect
+    }
+
+    /** UI callback: set culling mode & immediate redraw. */
+    public onCullingModeChange(mode: CullingMode): void {
+        this.viewportCulling.setCullingMode(mode);
+        
+        // Reset camera bounds and zoom when switching away from fog-of-war mode
+        if (mode !== CullingMode.FOG_OF_WAR && this.currentGrid) {
+            const width = this.currentGrid.width;
+            const height = this.currentGrid.height;
+            const offsetX = (this.scale.width - width * this.cellSize) / 2;
+            const offsetY = (this.scale.height - height * this.cellSize) / 2;
+            const gridWidth = width * this.cellSize;
+            const gridHeight = height * this.cellSize;
+            const pad = GameScene.CAMERA_PADDING;
+            
+            this.cameras.main.setBounds(offsetX - pad, offsetY - pad, gridWidth + pad * 2, gridHeight + pad * 2);
+            this.cameras.main.setZoom(1); // Reset to default zoom
+        }
+        
+        this.drawGrid(); // Redraw immediately to show effect
+    }
+
+    /** UI callback: update fog-of-war focus area buffer & immediate redraw. */
+    public onFogOfWarFocusAreaChange(): void {
+        this.viewportCulling.setFogOfWarFocusAreaBuffer(this.ui.getFogOfWarFocusAreaBuffer());
         this.drawGrid(); // Redraw immediately to show effect
     }
 

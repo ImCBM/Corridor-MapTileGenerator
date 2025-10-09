@@ -1,10 +1,12 @@
 // game-UI.ts
 // Handles all DOM UI logic for the game, decoupled from GameScene
 
+import { CullingMode } from './viewport-culling';
+
 export class GameUI {
     private infoElement: HTMLElement | null;
-    private cullingInput: HTMLInputElement | null;
-    private chunkCullingInput: HTMLInputElement | null;
+    private cullingModeInputs: NodeListOf<HTMLInputElement> | null;
+    private fogFocusAreaInput: HTMLInputElement | null;
     private widthInput: HTMLInputElement | null;
     private heightInput: HTMLInputElement | null;
     private regionsInput: HTMLInputElement | null;
@@ -20,8 +22,8 @@ export class GameUI {
 
     constructor() {
         this.infoElement = document.getElementById('info-text');
-        this.cullingInput = document.getElementById('culling') as HTMLInputElement;
-        this.chunkCullingInput = document.getElementById('chunk-culling') as HTMLInputElement;
+        this.cullingModeInputs = document.querySelectorAll('input[name="culling-mode"]');
+        this.fogFocusAreaInput = document.getElementById('fog-focus-area') as HTMLInputElement;
         this.widthInput = document.getElementById('width') as HTMLInputElement;
         this.heightInput = document.getElementById('height') as HTMLInputElement;
         this.regionsInput = document.getElementById('regions') as HTMLInputElement;
@@ -54,11 +56,43 @@ export class GameUI {
         }
     }
 
-    getCullingChecked(): boolean {
-        return this.cullingInput ? this.cullingInput.checked : true;
+    getCullingMode(): CullingMode {
+        if (!this.cullingModeInputs) return CullingMode.VIEWPORT;
+        
+        if (this.cullingModeInputs) {
+            for (let i = 0; i < this.cullingModeInputs.length; i++) {
+                const input = this.cullingModeInputs[i];
+                if (input.checked) {
+                    switch (input.value) {
+                        case 'viewport':
+                            return CullingMode.VIEWPORT;
+                        case 'chunk':
+                            return CullingMode.CHUNK;
+                        case 'fog-of-war':
+                            return CullingMode.FOG_OF_WAR;
+                        default:
+                            return CullingMode.VIEWPORT;
+                    }
+                }
+            }
+        }
+        return CullingMode.VIEWPORT; // Default fallback
     }
 
-    // --- Input Value Getters (except culling) ---
+    // Legacy methods for backward compatibility
+    getCullingChecked(): boolean {
+        return true; // Always enabled now, just different modes
+    }
+
+    getChunkCullingChecked(): boolean {
+        return this.getCullingMode() === CullingMode.CHUNK;
+    }
+
+    getFogOfWarFocusAreaBuffer(): number {
+        return this.fogFocusAreaInput ? parseInt(this.fogFocusAreaInput.value) || 5 : 5;
+    }
+
+    // --- Input Value Getters ---
     getWidth(): number {
         return this.widthInput ? parseInt(this.widthInput.value) || 50 : 50;
     }
@@ -73,11 +107,6 @@ export class GameUI {
 
     getDistance(): number {
         return this.distanceInput ? parseInt(this.distanceInput.value) || 3 : 3;
-    }
-
-    // --- Rendering Control Getters ---
-    getChunkCullingChecked(): boolean {
-        return this.chunkCullingInput ? this.chunkCullingInput.checked : false;
     }
 
     // --- Fog of War Control Getters ---

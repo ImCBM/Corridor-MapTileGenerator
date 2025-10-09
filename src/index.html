@@ -213,15 +213,30 @@
             <!-- Rendering Tab -->
             <div id="rendering-tab" class="tab-content">
                 <div class="control-group">
-                    <label for="culling">
-                        <input type="checkbox" id="culling" checked> Viewport Culling
+                    <label>Culling Mode:</label>
+                </div>
+                
+                <div class="control-group">
+                    <label for="culling-viewport">
+                        <input type="radio" id="culling-viewport" name="culling-mode" value="viewport" checked> Viewport Culling
                     </label>
                 </div>
                 
                 <div class="control-group">
-                    <label for="chunk-culling">
-                        <input type="checkbox" id="chunk-culling"> Chunk-based Culling
+                    <label for="culling-chunk">
+                        <input type="radio" id="culling-chunk" name="culling-mode" value="chunk"> Chunk-based Culling
                     </label>
+                </div>
+                
+                <div class="control-group">
+                    <label for="culling-fog">
+                        <input type="radio" id="culling-fog" name="culling-mode" value="fog-of-war"> Fog-of-War Culling
+                    </label>
+                </div>
+                
+                <div class="control-group" id="fog-focus-area-group">
+                    <label for="fog-focus-area">Focus Area Buffer:</label>
+                    <input type="number" id="fog-focus-area" min="0" max="20" value="5">
                 </div>
             </div>
             
@@ -330,6 +345,25 @@
                 fogIntensityValue.textContent = fogIntensitySlider.value + '%';
             });
         }
+        
+        // Show/hide fog-of-war focus area control based on culling mode
+        function updateFogFocusAreaVisibility() {
+            const fogCullingRadio = document.getElementById('culling-fog');
+            const focusAreaGroup = document.getElementById('fog-focus-area-group');
+            
+            if (fogCullingRadio && focusAreaGroup) {
+                focusAreaGroup.style.display = fogCullingRadio.checked ? 'block' : 'none';
+            }
+        }
+        
+        // Set up event listeners for culling mode changes
+        const cullingModeInputs = document.querySelectorAll('input[name="culling-mode"]');
+        cullingModeInputs.forEach(input => {
+            input.addEventListener('change', updateFogFocusAreaVisibility);
+        });
+        
+        // Initial setup
+        updateFogFocusAreaVisibility();
     })();
     // --- Collapsible and Draggable Menu ---
     (function() {

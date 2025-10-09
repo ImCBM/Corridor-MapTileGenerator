@@ -28,15 +28,24 @@ export interface ChunkInfo {
     offsetY: number;
 }
 
+export enum CullingMode {
+    VIEWPORT = 'viewport',
+    CHUNK = 'chunk',
+    FOG_OF_WAR = 'fog-of-war'
+}
+
 export class ViewportCulling {
     private static readonly CULL_BUFFER_CELLS = 2; // Extra tiles beyond viewport each side
     
     private enabled: boolean = true;
-    private chunkBasedCulling: boolean = false;
+    private cullingMode: CullingMode = CullingMode.VIEWPORT;
     
     // Chunk system properties
     private chunkSize: { width: number; height: number } = { width: 50, height: 50 };
     private currentChunk: { x: number; y: number } = { x: 0, y: 0 };
+    
+    // Fog-of-war culling properties
+    private fogOfWarFocusAreaBuffer: number = 5; // Extra tiles beyond maxTintRadius
     
     constructor() {}
     
@@ -55,17 +64,45 @@ export class ViewportCulling {
     }
     
     /**
-     * Enable or disable chunk-based culling
+     * Set the culling mode
      */
-    setChunkBasedCulling(enabled: boolean): void {
-        this.chunkBasedCulling = enabled;
+    setCullingMode(mode: CullingMode): void {
+        this.cullingMode = mode;
     }
     
     /**
-     * Get current chunk-based culling state
+     * Get current culling mode
+     */
+    getCullingMode(): CullingMode {
+        return this.cullingMode;
+    }
+    
+    /**
+     * Enable or disable chunk-based culling (legacy method)
+     */
+    setChunkBasedCulling(enabled: boolean): void {
+        this.cullingMode = enabled ? CullingMode.CHUNK : CullingMode.VIEWPORT;
+    }
+    
+    /**
+     * Get current chunk-based culling state (legacy method)
      */
     isChunkBasedCulling(): boolean {
-        return this.chunkBasedCulling;
+        return this.cullingMode === CullingMode.CHUNK;
+    }
+    
+    /**
+     * Set the fog-of-war focus area buffer
+     */
+    setFogOfWarFocusAreaBuffer(buffer: number): void {
+        this.fogOfWarFocusAreaBuffer = Math.max(0, buffer);
+    }
+    
+    /**
+     * Get the fog-of-war focus area buffer
+     */
+    getFogOfWarFocusAreaBuffer(): number {
+        return this.fogOfWarFocusAreaBuffer;
     }
     
     /**
@@ -83,7 +120,7 @@ export class ViewportCulling {
     }
     
     /**
-     * Calculate culling bounds based on camera viewport or chunk-based visibility
+     * Calculate culling bounds based on camera viewport, chunk-based visibility, or fog-of-war
      */
     calculateCullingBounds(
         grid: IntGrid,
@@ -92,7 +129,10 @@ export class ViewportCulling {
         offsetX: number,
         offsetY: number,
         scaleWidth: number,
-        scaleHeight: number
+        scaleHeight: number,
+        playerX?: number,
+        playerY?: number,
+        maxTintRadius?: number
     ): CullingBounds {
         if (!this.enabled) {
             // Return full grid bounds if culling is disabled
@@ -104,12 +144,16 @@ export class ViewportCulling {
             };
         }
         
-        if (this.chunkBasedCulling) {
-            return this.calculateChunkBasedBounds(grid);
-        } else {
-            return this.calculateViewportBasedBounds(
-                grid, camera, cellSize, offsetX, offsetY, scaleWidth, scaleHeight
-            );
+        switch (this.cullingMode) {
+            case CullingMode.CHUNK:
+                return this.calculateChunkBasedBounds(grid);
+            case CullingMode.FOG_OF_WAR:
+                return this.calculateFogOfWarBounds(grid, camera, cellSize, offsetX, offsetY, scaleWidth, scaleHeight, playerX, playerY, maxTintRadius);
+            case CullingMode.VIEWPORT:
+            default:
+                return this.calculateViewportBasedBounds(
+                    grid, camera, cellSize, offsetX, offsetY, scaleWidth, scaleHeight
+                );
         }
     }
     
@@ -167,6 +211,40 @@ export class ViewportCulling {
     }
     
     /**
+     * Calculate bounds based on fog-of-war around player position
+     */
+    private calculateFogOfWarBounds(
+        grid: IntGrid,
+        camera: Phaser.Cameras.Scene2D.Camera,
+        cellSize: number,
+        offsetX: number,
+        offsetY: number,
+        scaleWidth: number,
+        scaleHeight: number,
+        playerX?: number,
+        playerY?: number,
+        maxTintRadius?: number
+    ): CullingBounds {
+        // If player position is not provided, fall back to viewport culling
+        if (playerX === undefined || playerY === undefined || maxTintRadius === undefined) {
+            return this.calculateViewportBasedBounds(
+                grid, camera, cellSize, offsetX, offsetY, scaleWidth, scaleHeight
+            );
+        }
+        
+        // Calculate focus area size: maxTintRadius + buffer
+        const focusRadius = maxTintRadius + this.fogOfWarFocusAreaBuffer;
+        
+        // Create culling bounds centered on player
+        const startX = Math.max(0, playerX - focusRadius);
+        const endX = Math.min(grid.width - 1, playerX + focusRadius);
+        const startY = Math.max(0, playerY - focusRadius);
+        const endY = Math.min(grid.height - 1, playerY + focusRadius);
+        
+        return { startX, endX, startY, endY };
+    }
+    
+    /**
      * Get information about the current chunk
      */
     getCurrentChunkInfo(): ChunkInfo {
@@ -189,7 +267,7 @@ export class ViewportCulling {
      * Check if a tile coordinate is within the currently visible chunks
      */
     isTileInVisibleChunks(tileX: number, tileY: number): boolean {
-        if (!this.chunkBasedCulling) {
+        if (this.cullingMode !== CullingMode.CHUNK) {
             return true; // All tiles are visible when not using chunk-based culling
         }
         

@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
 import { GameScene } from './game-scene';
+import { CullingMode } from './viewport-culling';
 
 /*
   Entry Point (main.ts)
@@ -102,22 +103,30 @@ function setupUI(): void {
         });
     }
 
-    // Viewport culling checkbox: toggles whether only visible tiles are rendered.
-    const cullingCheckbox = document.getElementById('culling');
-    if (cullingCheckbox) {
-        cullingCheckbox.addEventListener('change', () => {
-            if (gameScene) {
-                gameScene.onCullingToggle();
+    // Culling mode radio buttons: handle culling mode changes
+    const cullingModeInputs = document.querySelectorAll('input[name="culling-mode"]');
+    cullingModeInputs.forEach(input => {
+        input.addEventListener('change', () => {
+            if (gameScene && input instanceof HTMLInputElement && input.checked) {
+                let mode: string = input.value;
+                // Convert string to CullingMode enum
+                if (mode === 'viewport') {
+                    gameScene.onCullingModeChange(CullingMode.VIEWPORT);
+                } else if (mode === 'chunk') {
+                    gameScene.onCullingModeChange(CullingMode.CHUNK);
+                } else if (mode === 'fog-of-war') {
+                    gameScene.onCullingModeChange(CullingMode.FOG_OF_WAR);
+                }
             }
         });
-    }
+    });
 
-    // Chunk-based culling checkbox: toggles chunk-based visibility
-    const chunkCullingCheckbox = document.getElementById('chunk-culling');
-    if (chunkCullingCheckbox) {
-        chunkCullingCheckbox.addEventListener('change', () => {
+    // Fog-of-war focus area buffer: update when changed
+    const fogFocusAreaInput = document.getElementById('fog-focus-area');
+    if (fogFocusAreaInput) {
+        fogFocusAreaInput.addEventListener('input', () => {
             if (gameScene) {
-                gameScene.onChunkCullingToggle();
+                gameScene.onFogOfWarFocusAreaChange();
             }
         });
     }
