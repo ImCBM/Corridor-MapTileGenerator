@@ -2,6 +2,8 @@ import * as Phaser from 'phaser';
 import { HeIsComingGenerator } from './level-generator';
 import { IntGrid } from './data-structures';
 import { OuterTileMarker } from './outer-tile-marker';
+import { Player } from './user-movement/player';
+import { VisibilitySystem } from './user-movement/visibility-system';
 
 /*
     GameScene
@@ -58,10 +60,15 @@ export class GameScene extends Phaser.Scene {
     private lastDrawTime: number = 0;
     private drawThrottleMs: number = GameScene.DRAG_REDRAW_THROTTLE_MS;            // ~60 FPS pacing for drag redraw.
     private useViewportCulling: boolean = true;     // Skip drawing tiles outside camera view.
+    
+    // Player movement system
+    private player: Player | null = null;
+    private visibilitySystem: VisibilitySystem;
 
     constructor() {
         super({ key: 'GameScene' });
         this.generator = new HeIsComingGenerator();
+        this.visibilitySystem = new VisibilitySystem();
     }
 
     create(): void {
@@ -102,6 +109,14 @@ export class GameScene extends Phaser.Scene {
             GameScene.DEFAULT_REGIONS,
             GameScene.DEFAULT_MIN_REGION_DIST
         );
+    }
+
+    update(): void {
+        // Update player movement
+        if (this.player && this.player.update()) {
+            // Player moved, redraw to update visibility effects
+            this.drawGrid();
+        }
     }
 
     /**
@@ -148,8 +163,8 @@ export class GameScene extends Phaser.Scene {
         minDistance: number = GameScene.DEFAULT_MIN_REGION_DIST
     ): void {
         try {
-            // Auto-calculate regions if set to 0
-            const finalRegions = regions === 0 ? width * height : regions;
+            // Auto-calculate regions if set to 0 (double the max of width/height)
+            const finalRegions = regions === 0 ? Math.max(width, height) * 2 : regions;
             
             // Update generator settings
             this.generator.levelSize = [width, height];
@@ -158,6 +173,9 @@ export class GameScene extends Phaser.Scene {
 
             // Generate the grid
             this.currentGrid = this.generator.generateLayout();
+
+            // Create/respawn player
+            this.createPlayer();
 
             // Draw the grid
             this.drawGrid();
@@ -239,6 +257,12 @@ export class GameScene extends Phaser.Scene {
                     color = GameScene.COLOR_EMPTY; // Light gray for empty
                 }
 
+                // Apply visibility tinting if player exists
+                if (this.player) {
+                    const tintIntensity = this.visibilitySystem.getTintIntensity(this.player.x, this.player.y, x, y);
+                    color = this.visibilitySystem.applyRedTint(color, tintIntensity);
+                }
+
                 // Filled rect (solid tile body)
                 this.graphics.fillStyle(color);
                 this.graphics.fillRect(screenX, screenY, this.cellSize, this.cellSize);
@@ -253,6 +277,11 @@ export class GameScene extends Phaser.Scene {
 
         // Update performance info
         this.updatePerformanceInfo(tilesRendered, width * height);
+
+        // Draw player if it exists
+        if (this.player) {
+            this.drawPlayer(offsetX, offsetY, height);
+        }
 
         // Expand camera bounds around grid with padding to allow some panning freedom.
         const gridWidth = width * this.cellSize;
@@ -292,6 +321,53 @@ export class GameScene extends Phaser.Scene {
                 }
             }, 3000);
         }
+    }
+
+    /**
+     * Create or recreate the player at a valid spawn position
+     */
+    private createPlayer(): void {
+        if (!this.currentGrid) return;
+
+        // Create new player
+        this.player = new Player(0, 0, this.generator.PATH_TILE);
+        this.player.setGrid(this.currentGrid);
+        
+        // Find a valid spawn position
+        if (!this.player.findValidSpawnPosition()) {
+            console.warn('Could not find valid spawn position for player');
+            this.player = null;
+        }
+    }
+
+    /**
+     * Draw the player as a red triangle
+     */
+    private drawPlayer(offsetX: number, offsetY: number, gridHeight: number): void {
+        if (!this.player) return;
+
+        // Convert player grid position to screen position
+        const screenX = this.player.x * this.cellSize + offsetX;
+        const screenY = (gridHeight - 1 - this.player.y) * this.cellSize + offsetY;
+
+        // Draw red triangle pointing up
+        this.graphics.fillStyle(0xFF0000); // Red color
+        this.graphics.beginPath();
+        
+        const centerX = screenX + this.cellSize / 2;
+        const centerY = screenY + this.cellSize / 2;
+        const size = this.cellSize * 0.4; // Triangle size relative to cell
+        
+        // Triangle vertices (pointing up)
+        this.graphics.moveTo(centerX, centerY - size); // Top point
+        this.graphics.lineTo(centerX - size, centerY + size); // Bottom left
+        this.graphics.lineTo(centerX + size, centerY + size); // Bottom right
+        this.graphics.closePath();
+        this.graphics.fill();
+
+        // Add a black outline for visibility
+        this.graphics.lineStyle(1, 0x000000, 1);
+        this.graphics.strokePath();
     }
 
     // Method to be called from UI
