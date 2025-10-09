@@ -1,7 +1,7 @@
 import * as Phaser from 'phaser';
-import { HeIsComingGenerator } from './level-generator';
-import { IntGrid } from './data-structures';
-import { OuterTileMarker } from './outer-tile-marker';
+import { HeIsComingGenerator } from './map-generation/level-generator';
+import { IntGrid } from './map-generation/data-structures';
+import { OuterTileMarker } from './map-generation/outer-tile-marker';
 import { Player } from './user-movement/player';
 import { VisibilitySystem } from './user-movement/visibility-system';
 import { GameUI } from './game-UI';

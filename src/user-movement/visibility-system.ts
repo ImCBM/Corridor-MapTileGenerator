@@ -9,7 +9,7 @@ export class VisibilitySystem {
     private enabled: boolean = true;         // Toggle fog of war on/off
     private clearRadius: number = 5;        // Tiles within this radius are clear
     private maxTintRadius: number = 8;      // Maximum radius for tinting effect
-    private tintIntensity: number = 0.8;    // How strong the fog effect is (0-1)
+    private tintIntensity: number = 0.1;    // How strong the fog effect is (0-1)
 
     /**
      * Enable or disable the fog of war effect

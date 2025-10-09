@@ -10,7 +10,7 @@
  * the entire generated grid.
  */
 
-import { IntGrid } from './data-structures';
+import { IntGrid } from './map-generation/data-structures';
 
 export interface CullingBounds {
     startX: number;

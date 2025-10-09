@@ -1,4 +1,4 @@
-import { IntGrid } from '../data-structures';
+import { IntGrid } from '../map-generation/data-structures';
 
 /**
  * Player
