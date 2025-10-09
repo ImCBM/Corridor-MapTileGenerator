@@ -5,6 +5,7 @@ import { OuterTileMarker } from './outer-tile-marker';
 import { Player } from './user-movement/player';
 import { VisibilitySystem } from './user-movement/visibility-system';
 import { GameUI } from './game-UI';
+import { ViewportCulling } from './viewport-culling';
 
 /*
     GameScene
@@ -40,7 +41,6 @@ export class GameScene extends Phaser.Scene {
     private static readonly WHEEL_ZOOM_FACTOR = 0.001;     // Scale wheel delta.
     private static readonly MIN_ZOOM = 0.1;
     private static readonly MAX_ZOOM = 3;
-    private static readonly CULL_BUFFER_CELLS = 2;         // Extra tiles beyond viewport each side.
     private static readonly CAMERA_PADDING = 100;          // Extra world bounds padding around grid.
     private static readonly DEFAULT_WIDTH = 50;
     private static readonly DEFAULT_HEIGHT = 50;
@@ -60,7 +60,9 @@ export class GameScene extends Phaser.Scene {
     private cellSize: number = GameScene.DEFAULT_CELL_SIZE;                 // Pixels per grid cell.
     private lastDrawTime: number = 0;
     private drawThrottleMs: number = GameScene.DRAG_REDRAW_THROTTLE_MS;            // ~60 FPS pacing for drag redraw.
-    private useViewportCulling: boolean = true;     // Skip drawing tiles outside camera view.
+    
+    // Viewport culling system
+    private viewportCulling: ViewportCulling;
     
     // Player movement system
     private player: Player | null = null;
@@ -72,6 +74,7 @@ export class GameScene extends Phaser.Scene {
         this.generator = new HeIsComingGenerator();
         this.visibilitySystem = new VisibilitySystem();
         this.ui = new GameUI();
+        this.viewportCulling = new ViewportCulling();
     }
 
     create(): void {
@@ -212,26 +215,21 @@ export class GameScene extends Phaser.Scene {
         const offsetX = (this.scale.width - width * this.cellSize) / 2;
         const offsetY = (this.scale.height - height * this.cellSize) / 2;
 
-        // Viewport culling bounds - only if enabled
-        let startX = 0, endX = width - 1, startY = 0, endY = height - 1;
+        // Calculate culling bounds using the viewport culling system
+        const cullingBounds = this.viewportCulling.calculateCullingBounds(
+            this.currentGrid,
+            this.cameras.main,
+            this.cellSize,
+            offsetX,
+            offsetY,
+            this.scale.width,
+            this.scale.height
+        );
         
-        if (this.useViewportCulling) {
-            const camera = this.cameras.main;
-            const zoom = camera.zoom;
-            
-            // Convert camera bounds to grid coordinates
-            const viewLeft = (camera.scrollX - offsetX) / this.cellSize;
-            const viewRight = ((camera.scrollX + this.scale.width / zoom) - offsetX) / this.cellSize;
-            const viewTop = (camera.scrollY - offsetY) / this.cellSize;
-            const viewBottom = ((camera.scrollY + this.scale.height / zoom) - offsetY) / this.cellSize;
-
-            // Add buffer around visible area (in grid cells)
-            const buffer = GameScene.CULL_BUFFER_CELLS;
-            startX = Math.max(0, Math.floor(viewLeft) - buffer);
-            endX = Math.min(width - 1, Math.ceil(viewRight) + buffer);
-            startY = Math.max(0, Math.floor(viewTop) - buffer);
-            endY = Math.min(height - 1, Math.ceil(viewBottom) + buffer);
-        }
+        const startX = cullingBounds.startX;
+        const endX = cullingBounds.endX;
+        const startY = cullingBounds.startY;
+        const endY = cullingBounds.endY;
 
         // Only draw visible tiles
         let tilesRendered = 0;
@@ -262,7 +260,7 @@ export class GameScene extends Phaser.Scene {
 
                 // Apply visibility tinting if player exists
                 if (this.player) {
-                    const tintIntensity = this.visibilitySystem.getTintIntensity(this.player.x, this.player.y, x, y);
+                    const tintIntensity = this.visibilitySystem.calculateTintIntensity(this.player.x, this.player.y, x, y);
                     color = this.visibilitySystem.applyRedTint(color, tintIntensity);
                 }
 
@@ -374,14 +372,47 @@ export class GameScene extends Phaser.Scene {
         const height = this.ui.getHeight();
         const regions = this.ui.getRegions();
         const distance = this.ui.getDistance();
-        this.useViewportCulling = this.ui.getCullingChecked();
+        
+        // Update rendering settings
+        this.viewportCulling.setEnabled(this.ui.getCullingChecked());
+        this.viewportCulling.setChunkBasedCulling(this.ui.getChunkCullingChecked());
+        
+        // Update visibility settings
+        this.updateVisibilitySettings();
+        
         this.generateLevel(width, height, regions, distance);
     }
 
     // Method to toggle viewport culling from UI
     /** UI callback: toggle viewport culling & immediate redraw. */
     public onCullingToggle(): void {
-        this.useViewportCulling = this.ui.getCullingChecked();
+        this.viewportCulling.setEnabled(this.ui.getCullingChecked());
+        this.drawGrid(); // Redraw immediately to show effect
+    }
+
+    /** UI callback: toggle chunk-based culling & immediate redraw. */
+    public onChunkCullingToggle(): void {
+        this.viewportCulling.setChunkBasedCulling(this.ui.getChunkCullingChecked());
+        this.drawGrid(); // Redraw immediately to show effect
+    }
+
+    /** UI callback: toggle fog of war & immediate redraw. */
+    public onFogOfWarToggle(): void {
+        this.visibilitySystem.setEnabled(this.ui.getFogOfWarChecked());
+        this.drawGrid(); // Redraw immediately to show effect
+    }
+
+    /** Update visibility system settings from UI */
+    private updateVisibilitySettings(): void {
+        this.visibilitySystem.setEnabled(this.ui.getFogOfWarChecked());
+        this.visibilitySystem.setClearRadius(this.ui.getClearRadius());
+        this.visibilitySystem.setMaxTintRadius(this.ui.getMaxRadius());
+        this.visibilitySystem.setTintIntensity(this.ui.getFogIntensity() / 100); // Convert percentage to 0-1
+    }
+
+    /** UI callback: update visibility settings & immediate redraw. */
+    public onVisibilitySettingsChange(): void {
+        this.updateVisibilitySettings();
         this.drawGrid(); // Redraw immediately to show effect
     }
 }

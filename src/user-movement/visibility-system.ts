@@ -1,13 +1,71 @@
 /**
  * VisibilitySystem
  * ----------------
- * Handles the red tinting effect around the player based on distance.
+ * Handles the fog of war and visibility effects around the player.
+ * Can be toggled on/off and configured with different settings.
  * Creates a visibility radius where tiles become more tinted the further they are.
  */
 export class VisibilitySystem {
-    private readonly CLEAR_RADIUS = 5;      // Tiles within this radius are clear
-    private readonly MAX_TINT_RADIUS = 8;   // Maximum radius for tinting effect
-    private readonly TINT_DIAMETER = 8;     // 8 tile diameter as requested
+    private enabled: boolean = true;         // Toggle fog of war on/off
+    private clearRadius: number = 5;        // Tiles within this radius are clear
+    private maxTintRadius: number = 8;      // Maximum radius for tinting effect
+    private tintIntensity: number = 0.8;    // How strong the fog effect is (0-1)
+
+    /**
+     * Enable or disable the fog of war effect
+     */
+    setEnabled(enabled: boolean): void {
+        this.enabled = enabled;
+    }
+    
+    /**
+     * Get current enabled state
+     */
+    isEnabled(): boolean {
+        return this.enabled;
+    }
+    
+    /**
+     * Set the clear radius (tiles within this radius are completely visible)
+     */
+    setClearRadius(radius: number): void {
+        this.clearRadius = Math.max(0, radius);
+    }
+    
+    /**
+     * Get current clear radius
+     */
+    getClearRadius(): number {
+        return this.clearRadius;
+    }
+    
+    /**
+     * Set the maximum tint radius (beyond this tiles are completely fogged)
+     */
+    setMaxTintRadius(radius: number): void {
+        this.maxTintRadius = Math.max(this.clearRadius + 1, radius);
+    }
+    
+    /**
+     * Get current maximum tint radius
+     */
+    getMaxTintRadius(): number {
+        return this.maxTintRadius;
+    }
+    
+    /**
+     * Set the fog intensity (how strong the fog effect is)
+     */
+    setTintIntensity(intensity: number): void {
+        this.tintIntensity = Math.max(0, Math.min(1, intensity));
+    }
+    
+    /**
+     * Get current fog intensity
+     */
+    getTintIntensity(): number {
+        return this.tintIntensity;
+    }
 
     /**
      * Calculate the tint intensity for a tile based on its distance from the player
@@ -17,26 +75,31 @@ export class VisibilitySystem {
      * @param tileY - Tile's Y position
      * @returns Tint intensity from 0 (no tint) to 1 (maximum tint)
      */
-    getTintIntensity(playerX: number, playerY: number, tileX: number, tileY: number): number {
+    calculateTintIntensity(playerX: number, playerY: number, tileX: number, tileY: number): number {
+        if (!this.enabled) {
+            return 0; // No fog when disabled
+        }
+        
         // Calculate distance using Chebyshev distance (max of dx, dy) for square effect
         const dx = Math.abs(tileX - playerX);
         const dy = Math.abs(tileY - playerY);
         const distance = Math.max(dx, dy);
 
         // No tint within clear radius
-        if (distance <= this.CLEAR_RADIUS) {
+        if (distance <= this.clearRadius) {
             return 0;
         }
 
         // Full tint beyond max radius
-        if (distance > this.MAX_TINT_RADIUS) {
-            return 1;
+        if (distance > this.maxTintRadius) {
+            return this.tintIntensity;
         }
 
         // Gradual tint between clear radius and max radius
-        const tintRange = this.MAX_TINT_RADIUS - this.CLEAR_RADIUS;
-        const distanceInTintRange = distance - this.CLEAR_RADIUS;
-        return distanceInTintRange / tintRange;
+        const tintRange = this.maxTintRadius - this.clearRadius;
+        const distanceInTintRange = distance - this.clearRadius;
+        const normalizedDistance = distanceInTintRange / tintRange;
+        return normalizedDistance * this.tintIntensity;
     }
 
     /**
@@ -73,9 +136,13 @@ export class VisibilitySystem {
      * @returns True if the tile is within the visibility radius
      */
     isWithinVisibilityRadius(playerX: number, playerY: number, tileX: number, tileY: number): boolean {
+        if (!this.enabled) {
+            return false; // No visibility effects when disabled
+        }
+        
         const dx = Math.abs(tileX - playerX);
         const dy = Math.abs(tileY - playerY);
         const distance = Math.max(dx, dy);
-        return distance <= this.MAX_TINT_RADIUS;
+        return distance <= this.maxTintRadius;
     }
 }

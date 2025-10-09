@@ -78,6 +78,47 @@
             margin-right: 8px;
         }
         
+        .control-group input[type="range"] {
+            width: 100px;
+            margin-right: 8px;
+        }
+        
+        /* Tab Styles */
+        .tab-nav {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #5a6c7d;
+        }
+        
+        .tab-btn {
+            background: none;
+            border: none;
+            color: #bdc3c7;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 13px;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+        
+        .tab-btn:hover {
+            color: #ecf0f1;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .tab-btn.active {
+            color: #3498db;
+            border-bottom-color: #3498db;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
         .control-group button {
             background: #3498db;
             color: white;
@@ -133,35 +174,81 @@
             <button id="collapse-btn" title="Collapse/Expand Menu">&#x25B2;</button>
         </div>
         <div id="ui-content">
-        
-        <div class="control-group">
-            <label for="width">Width:</label>
-            <input type="number" id="width" min="10" max="100" value="50">
-        </div>
-        
-        <div class="control-group">
-            <label for="height">Height:</label>
-            <input type="number" id="height" min="10" max="100" value="50">
-        </div>
-        
-        <div class="control-group" style="display: flex; align-items: center; gap: 6px;">
-            <label for="regions" style="margin-bottom:0;">Regions:</label>
-            <input type="number" id="regions" min="0" max="5000" value="0" placeholder="0 = auto (width × height)">
-            <span id="regions-default-info" style="display:none;color:#aaa;font-style:italic;font-size:11px;margin-left:4px;"></span>
-        </div>
-        <div class="control-group">
-            <label for="distance">Min Distance:</label>
-            <input type="number" id="distance" min="1" max="10" value="3">
-        </div>
-        
-        <div class="control-group">
-            <label for="culling">
-                <input type="checkbox" id="culling" > Viewport Culling
-            </label>
-        </div>
-        
-        <div class="control-group">
-            <button id="generate-btn">Generate Level</button>
+            
+            <!-- Tab Navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" data-tab="generation">Generation</button>
+                <button class="tab-btn" data-tab="rendering">Rendering</button>
+                <button class="tab-btn" data-tab="visibility">Visibility</button>
+            </div>
+            
+            <!-- Generation Tab -->
+            <div id="generation-tab" class="tab-content active">
+                <div class="control-group">
+                    <label for="width">Width:</label>
+                    <input type="number" id="width" min="10" max="100" value="50">
+                </div>
+                
+                <div class="control-group">
+                    <label for="height">Height:</label>
+                    <input type="number" id="height" min="10" max="100" value="50">
+                </div>
+                
+                <div class="control-group" style="display: flex; align-items: center; gap: 6px;">
+                    <label for="regions" style="margin-bottom:0;">Regions:</label>
+                    <input type="number" id="regions" min="0" max="5000" value="0" placeholder="0 = auto (width × height)">
+                    <span id="regions-default-info" style="display:none;color:#aaa;font-style:italic;font-size:11px;margin-left:4px;"></span>
+                </div>
+                
+                <div class="control-group">
+                    <label for="distance">Min Distance:</label>
+                    <input type="number" id="distance" min="1" max="10" value="3">
+                </div>
+                
+                <div class="control-group">
+                    <button id="generate-btn">Generate Level</button>
+                </div>
+            </div>
+            
+            <!-- Rendering Tab -->
+            <div id="rendering-tab" class="tab-content">
+                <div class="control-group">
+                    <label for="culling">
+                        <input type="checkbox" id="culling" checked> Viewport Culling
+                    </label>
+                </div>
+                
+                <div class="control-group">
+                    <label for="chunk-culling">
+                        <input type="checkbox" id="chunk-culling"> Chunk-based Culling
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Visibility Tab -->
+            <div id="visibility-tab" class="tab-content">
+                <div class="control-group">
+                    <label for="fog-of-war">
+                        <input type="checkbox" id="fog-of-war" checked> Fog of War
+                    </label>
+                </div>
+                
+                <div class="control-group">
+                    <label for="clear-radius">Clear Radius:</label>
+                    <input type="number" id="clear-radius" min="1" max="20" value="5">
+                </div>
+                
+                <div class="control-group">
+                    <label for="max-radius">Max Fog Radius:</label>
+                    <input type="number" id="max-radius" min="2" max="30" value="8">
+                </div>
+                
+                <div class="control-group">
+                    <label for="fog-intensity">Fog Intensity:</label>
+                    <input type="range" id="fog-intensity" min="0" max="100" value="80">
+                    <span id="fog-intensity-value">80%</span>
+                </div>
+            </div>
         </div>
         
         <div class="legend">
@@ -215,6 +302,34 @@
         widthInput.addEventListener('input', updateDefaultInfo);
         heightInput.addEventListener('input', updateDefaultInfo);
         updateDefaultInfo();
+        
+        // Tab switching functionality
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+        
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetTab = btn.getAttribute('data-tab');
+                
+                // Remove active class from all tabs and contents
+                tabBtns.forEach(b => b.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                
+                // Add active class to clicked tab and corresponding content
+                btn.classList.add('active');
+                document.getElementById(targetTab + '-tab').classList.add('active');
+            });
+        });
+        
+        // Fog intensity slider update
+        const fogIntensitySlider = document.getElementById('fog-intensity');
+        const fogIntensityValue = document.getElementById('fog-intensity-value');
+        
+        if (fogIntensitySlider && fogIntensityValue) {
+            fogIntensitySlider.addEventListener('input', () => {
+                fogIntensityValue.textContent = fogIntensitySlider.value + '%';
+            });
+        }
     })();
     // --- Collapsible and Draggable Menu ---
     (function() {

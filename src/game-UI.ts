@@ -4,19 +4,35 @@
 export class GameUI {
     private infoElement: HTMLElement | null;
     private cullingInput: HTMLInputElement | null;
+    private chunkCullingInput: HTMLInputElement | null;
     private widthInput: HTMLInputElement | null;
     private heightInput: HTMLInputElement | null;
     private regionsInput: HTMLInputElement | null;
     private distanceInput: HTMLInputElement | null;
+    
+    // Fog of war controls
+    private fogOfWarInput: HTMLInputElement | null;
+    private clearRadiusInput: HTMLInputElement | null;
+    private maxRadiusInput: HTMLInputElement | null;
+    private fogIntensityInput: HTMLInputElement | null;
+    
     private indicators: { [key: string]: HTMLElement } = {};
 
     constructor() {
         this.infoElement = document.getElementById('info-text');
         this.cullingInput = document.getElementById('culling') as HTMLInputElement;
+        this.chunkCullingInput = document.getElementById('chunk-culling') as HTMLInputElement;
         this.widthInput = document.getElementById('width') as HTMLInputElement;
         this.heightInput = document.getElementById('height') as HTMLInputElement;
         this.regionsInput = document.getElementById('regions') as HTMLInputElement;
         this.distanceInput = document.getElementById('distance') as HTMLInputElement;
+        
+        // Fog of war controls
+        this.fogOfWarInput = document.getElementById('fog-of-war') as HTMLInputElement;
+        this.clearRadiusInput = document.getElementById('clear-radius') as HTMLInputElement;
+        this.maxRadiusInput = document.getElementById('max-radius') as HTMLInputElement;
+        this.fogIntensityInput = document.getElementById('fog-intensity') as HTMLInputElement;
+        
         this.createDirectionIndicators();
     }
 
@@ -57,6 +73,28 @@ export class GameUI {
 
     getDistance(): number {
         return this.distanceInput ? parseInt(this.distanceInput.value) || 3 : 3;
+    }
+
+    // --- Rendering Control Getters ---
+    getChunkCullingChecked(): boolean {
+        return this.chunkCullingInput ? this.chunkCullingInput.checked : false;
+    }
+
+    // --- Fog of War Control Getters ---
+    getFogOfWarChecked(): boolean {
+        return this.fogOfWarInput ? this.fogOfWarInput.checked : true;
+    }
+
+    getClearRadius(): number {
+        return this.clearRadiusInput ? parseInt(this.clearRadiusInput.value) || 5 : 5;
+    }
+
+    getMaxRadius(): number {
+        return this.maxRadiusInput ? parseInt(this.maxRadiusInput.value) || 8 : 8;
+    }
+
+    getFogIntensity(): number {
+        return this.fogIntensityInput ? parseInt(this.fogIntensityInput.value) || 80 : 80;
     }
 
     // --- Directional Indicators ---

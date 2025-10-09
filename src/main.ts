@@ -112,6 +112,55 @@ function setupUI(): void {
         });
     }
 
+    // Chunk-based culling checkbox: toggles chunk-based visibility
+    const chunkCullingCheckbox = document.getElementById('chunk-culling');
+    if (chunkCullingCheckbox) {
+        chunkCullingCheckbox.addEventListener('change', () => {
+            if (gameScene) {
+                gameScene.onChunkCullingToggle();
+            }
+        });
+    }
+
+    // Fog of war checkbox: toggles visibility effects
+    const fogOfWarCheckbox = document.getElementById('fog-of-war');
+    if (fogOfWarCheckbox) {
+        fogOfWarCheckbox.addEventListener('change', () => {
+            if (gameScene) {
+                gameScene.onFogOfWarToggle();
+            }
+        });
+    }
+
+    // Visibility settings: update when changed
+    const clearRadiusInput = document.getElementById('clear-radius');
+    const maxRadiusInput = document.getElementById('max-radius');
+    const fogIntensityInput = document.getElementById('fog-intensity');
+    
+    if (clearRadiusInput) {
+        clearRadiusInput.addEventListener('input', () => {
+            if (gameScene) {
+                gameScene.onVisibilitySettingsChange();
+            }
+        });
+    }
+    
+    if (maxRadiusInput) {
+        maxRadiusInput.addEventListener('input', () => {
+            if (gameScene) {
+                gameScene.onVisibilitySettingsChange();
+            }
+        });
+    }
+    
+    if (fogIntensityInput) {
+        fogIntensityInput.addEventListener('input', () => {
+            if (gameScene) {
+                gameScene.onVisibilitySettingsChange();
+            }
+        });
+    }
+
     // Keep Phaser canvas sized to window (simple responsive behavior).
     window.addEventListener('resize', () => {
         if (game.scale && game.scale.resize) {

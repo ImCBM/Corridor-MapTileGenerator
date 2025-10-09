@@ -74,10 +74,10 @@ export class Player {
 
         // Check for movement input (WASD or Arrow keys)
         if (this.keys['keyw'] || this.keys['arrowup']) {
-            newY = this.y - 1;
+            newY = this.y + 1;
             moved = true;
         } else if (this.keys['keys'] || this.keys['arrowdown']) {
-            newY = this.y + 1;
+            newY = this.y - 1;
             moved = true;
         } else if (this.keys['keya'] || this.keys['arrowleft']) {
             newX = this.x - 1;
