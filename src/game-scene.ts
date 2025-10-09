@@ -4,6 +4,7 @@ import { IntGrid } from './data-structures';
 import { OuterTileMarker } from './outer-tile-marker';
 import { Player } from './user-movement/player';
 import { VisibilitySystem } from './user-movement/visibility-system';
+import { GameUI } from './game-UI';
 
 /*
     GameScene
@@ -64,11 +65,13 @@ export class GameScene extends Phaser.Scene {
     // Player movement system
     private player: Player | null = null;
     private visibilitySystem: VisibilitySystem;
+    private ui: GameUI;
 
     constructor() {
         super({ key: 'GameScene' });
         this.generator = new HeIsComingGenerator();
         this.visibilitySystem = new VisibilitySystem();
+        this.ui = new GameUI();
     }
 
     create(): void {
@@ -292,35 +295,24 @@ export class GameScene extends Phaser.Scene {
 
     /** Display simple connection count summary (called after generation). */
     private updateInfoDisplay(): void {
-        const infoElement = document.getElementById('info-text');
-        if (infoElement && this.generator.edges) {
-            infoElement.textContent = `Generated ${this.generator.edges.length} connections between regions`;
+        if (this.generator.edges) {
+            this.ui.updateInfo(`Generated ${this.generator.edges.length} connections between regions`);
         }
     }
 
     /** Update render diagnostics (visible vs total tiles). */
     private updatePerformanceInfo(tilesRendered: number, totalTiles: number): void {
-        const infoElement = document.getElementById('info-text');
-        if (infoElement && this.generator.edges) {
+        if (this.generator.edges) {
             const percentage = ((tilesRendered / totalTiles) * 100).toFixed(1);
-            infoElement.textContent = `Generated ${this.generator.edges.length} connections | Rendering ${tilesRendered}/${totalTiles} tiles (${percentage}%)`;
+            this.ui.updateInfo(`Generated ${this.generator.edges.length} connections | Rendering ${tilesRendered}/${totalTiles} tiles (${percentage}%)`);
         }
     }
 
     /** Flash error message in info-text area (auto resets color). */
     private showError(message: string): void {
-        const infoElement = document.getElementById('info-text');
-        if (infoElement) {
-            infoElement.textContent = message;
-            infoElement.style.color = '#e74c3c';
-            
-            // Reset color after 3 seconds
-            setTimeout(() => {
-                if (infoElement) {
-                    infoElement.style.color = '#bdc3c7';
-                }
-            }, 3000);
-        }
+        this.ui.updateInfo(message);
+        this.ui.setInfoColor('#e74c3c');
+        setTimeout(() => this.ui.resetInfoColor(), 3000);
     }
 
     /**
@@ -375,27 +367,21 @@ export class GameScene extends Phaser.Scene {
      * UI callback: Pull parameter inputs from DOM then regenerate.
      * Acts as boundary between DOM world and Phaser scene internals.
      */
+
     public onGenerateButtonClick(): void {
-        const widthInput = document.getElementById('width') as HTMLInputElement;
-        const heightInput = document.getElementById('height') as HTMLInputElement;
-        const regionsInput = document.getElementById('regions') as HTMLInputElement;
-        const distanceInput = document.getElementById('distance') as HTMLInputElement;
-        const cullingInput = document.getElementById('culling') as HTMLInputElement;
-
-        const width = parseInt(widthInput.value) || GameScene.DEFAULT_WIDTH;
-        const height = parseInt(heightInput.value) || GameScene.DEFAULT_HEIGHT;
-        const regions = parseInt(regionsInput.value) || GameScene.DEFAULT_REGIONS; // 0 triggers auto-calculation
-        const distance = parseInt(distanceInput.value) || GameScene.DEFAULT_MIN_REGION_DIST;
-        this.useViewportCulling = cullingInput.checked;
-
+        // Use UI to get values
+        const width = this.ui.getWidth();
+        const height = this.ui.getHeight();
+        const regions = this.ui.getRegions();
+        const distance = this.ui.getDistance();
+        this.useViewportCulling = this.ui.getCullingChecked();
         this.generateLevel(width, height, regions, distance);
     }
 
     // Method to toggle viewport culling from UI
     /** UI callback: toggle viewport culling & immediate redraw. */
     public onCullingToggle(): void {
-        const cullingInput = document.getElementById('culling') as HTMLInputElement;
-        this.useViewportCulling = cullingInput.checked;
+        this.useViewportCulling = this.ui.getCullingChecked();
         this.drawGrid(); // Redraw immediately to show effect
     }
 }
