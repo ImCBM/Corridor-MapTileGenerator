@@ -79,7 +79,7 @@ export class VisibilitySystem {
         if (!this.enabled) {
             return 0; // No fog when disabled
         }
-        
+
         // Calculate distance using Chebyshev distance (max of dx, dy) for square effect
         const dx = Math.abs(tileX - playerX);
         const dy = Math.abs(tileY - playerY);
@@ -90,9 +90,9 @@ export class VisibilitySystem {
             return 0;
         }
 
-        // Full tint beyond max radius
+        // Fully tint (completely cover) beyond max radius
         if (distance > this.maxTintRadius) {
-            return this.tintIntensity;
+            return 1; // 1 means fully tinted, covers the tile color completely
         }
 
         // Gradual tint between clear radius and max radius
