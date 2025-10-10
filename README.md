@@ -1,7 +1,5 @@
 # Corridor-MapTileGenerator: Procedural Level Generator - TypeScript + Phaser.js
 
-A TypeScript + Phaser.js sandbox for iterating on grid-based maze and dungeon layouts. The toolkit evolved from an internal prototype and is now public so you can fork it, plug it into your own game, or simply harvest layouts.
-
 ## Features
 
 - **Procedural Generation**: Creates random level layouts with interconnected regions
