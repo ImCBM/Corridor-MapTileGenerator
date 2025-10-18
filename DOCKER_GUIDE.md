@@ -241,6 +241,66 @@ Once running, you can:
 3. **Navigate**: Use mouse to pan and zoom around the generated level
 4. **Toggle Features**: Enable/disable viewport culling, fog of war, etc.
 
+## 🚀 **NEW: Auto-Scaling Game Server Cluster**
+
+### **Multi-Player Server Setup**
+
+Your project now includes an intelligent auto-scaling system that works like game servers:
+
+```
+Player 1 → http://localhost:80 → Load Balancer → Best Available Server
+Player 2 → http://localhost:80 → Load Balancer → Best Available Server  
+Player 3 → http://localhost:80 → Load Balancer → Best Available Server
+```
+
+### **Auto-Scaling Features**
+
+- ✅ **Persistent Server**: Server 1 always runs (port 8080)
+- ✅ **Smart Load Balancer**: Routes traffic intelligently
+- ✅ **Auto-Scaling**: Creates servers on demand
+- ✅ **Inactivity Shutdown**: Stops servers after 10s of no activity
+- ✅ **Auto-Cleanup**: Deletes containers after 30s in stopped state
+- ✅ **Real-time Monitoring**: Live dashboard showing server status
+
+### **Quick Start - Auto-Scaling Cluster**
+
+**Windows:**
+```cmd
+cluster-manager.bat start-monitoring
+```
+
+**Linux/Mac:**
+```bash
+chmod +x cluster-manager.sh
+./cluster-manager.sh start-monitoring
+```
+
+**Access Points:**
+- 🎮 **Main Game**: `http://localhost:80` (auto-balanced)
+- 🏠 **Server 1**: `http://localhost:8080` (always available)
+- 📊 **Monitor**: `http://localhost:3001` (real-time dashboard)
+
+### **Cluster Management Commands**
+
+| Command | Description |
+|---------|-------------|
+| `start` | Start auto-scaling cluster |
+| `start-monitoring` | Start with monitoring dashboard |
+| `status` | Show current server status |
+| `test` | Test auto-scaling behavior |
+| `stop` | Stop all servers |
+| `cleanup` | Remove all containers |
+
+### **How Auto-Scaling Works**
+
+1. **Demand Detection**: Load balancer monitors traffic
+2. **Server Creation**: Spins up new containers automatically
+3. **Load Distribution**: Routes players to optimal servers  
+4. **Inactivity Monitoring**: Tracks server usage
+5. **Graceful Shutdown**: Stops inactive servers (10s timeout)
+6. **Resource Cleanup**: Removes containers (30s after stop)
+7. **Persistent Core**: Server 1 always remains available
+
 ## 🛡️ Security Notes
 
 The production setup includes:
