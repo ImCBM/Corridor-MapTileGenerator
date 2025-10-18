@@ -1,19 +1,23 @@
 import { IntGrid } from '../map-generation/data-structures';
+import { ChunkManager } from '../map-generation/chunk-manager';
 
 /**
  * Player
  * ------
  * Represents the player character (red triangle) that can move on path tiles.
  * Handles WASD/Arrow key input and validates movement against the grid.
+ * Enhanced to support world coordinates and chunk transitions.
  */
 export class Player {
-    public x: number;
-    public y: number;
-    private grid: IntGrid | null = null;
+    public x: number; // World coordinates
+    public y: number; // World coordinates
+    private grid: IntGrid | null = null; // Legacy grid reference (for compatibility)
+    private chunkManager: ChunkManager | null = null;
     private pathTileType: number;
     private keys: { [key: string]: boolean } = {};
     private lastMoveTime: number = 0;
     private readonly MOVE_COOLDOWN = 150; // milliseconds between moves
+    private onChunkGenerated?: (chunkX: number, chunkY: number) => void;
 
     constructor(startX: number, startY: number, pathTileType: number) {
         this.x = startX;
@@ -23,10 +27,24 @@ export class Player {
     }
 
     /**
-     * Set the grid reference for movement validation
+     * Set the grid reference for movement validation (legacy method)
      */
     setGrid(grid: IntGrid): void {
         this.grid = grid;
+    }
+
+    /**
+     * Set the chunk manager for multi-chunk movement
+     */
+    setChunkManager(chunkManager: ChunkManager): void {
+        this.chunkManager = chunkManager;
+    }
+
+    /**
+     * Set callback for when new chunks are generated
+     */
+    setOnChunkGenerated(callback: (chunkX: number, chunkY: number) => void): void {
+        this.onChunkGenerated = callback;
     }
 
     /**
@@ -61,7 +79,8 @@ export class Player {
      * Update player position based on input (call this each frame)
      */
     update(): boolean {
-        if (!this.grid) return false;
+        // Prefer chunk manager if available, otherwise use legacy grid
+        if (!this.chunkManager && !this.grid) return false;
 
         const now = Date.now();
         if (now - this.lastMoveTime < this.MOVE_COOLDOWN) {
@@ -88,9 +107,31 @@ export class Player {
         }
 
         if (moved && this.canMoveTo(newX, newY)) {
-            this.x = newX;
-            this.y = newY;
-            this.lastMoveTime = now;
+            // Check if we're stepping on an outer tile before moving
+            if (this.chunkManager) {
+                const wasOnOuterTile = this.chunkManager.isOnOuterTile(this.x, this.y);
+                
+                this.x = newX;
+                this.y = newY;
+                this.lastMoveTime = now;
+
+                // Check if we just stepped on an outer tile
+                const nowOnOuterTile = this.chunkManager.isOnOuterTile(this.x, this.y);
+                
+                if (nowOnOuterTile && !wasOnOuterTile) {
+                    // Handle stepping on outer tile
+                    const result = this.chunkManager.handleOuterTileStep(this.x, this.y);
+                    if (result && result.newChunkGenerated && this.onChunkGenerated) {
+                        this.onChunkGenerated(result.targetChunk.chunkX, result.targetChunk.chunkY);
+                    }
+                }
+            } else {
+                // Legacy grid-based movement
+                this.x = newX;
+                this.y = newY;
+                this.lastMoveTime = now;
+            }
+
             return true;
         }
 
@@ -101,6 +142,18 @@ export class Player {
      * Check if the player can move to the specified position
      */
     private canMoveTo(x: number, y: number): boolean {
+        // Use chunk manager if available
+        if (this.chunkManager) {
+            try {
+                const tileType = this.chunkManager.getTileAtWorld(x, y);
+                return tileType === this.pathTileType;
+            } catch (error) {
+                // If chunk doesn't exist or there's an error, can't move there
+                return false;
+            }
+        }
+
+        // Legacy grid-based movement
         if (!this.grid) return false;
 
         // Check bounds
@@ -127,6 +180,12 @@ export class Player {
      * Find a valid spawn position on a path tile
      */
     findValidSpawnPosition(): boolean {
+        // Use chunk manager if available
+        if (this.chunkManager) {
+            return this.findValidSpawnPositionInChunk(0, 0);
+        }
+
+        // Legacy grid-based spawning
         if (!this.grid) return false;
 
         // Try to find a path tile to spawn on
@@ -140,5 +199,44 @@ export class Player {
             }
         }
         return false;
+    }
+
+    /**
+     * Find a valid spawn position within a specific chunk
+     */
+    private findValidSpawnPositionInChunk(chunkX: number, chunkY: number): boolean {
+        if (!this.chunkManager) return false;
+
+        const chunk = this.chunkManager.getChunk(chunkX, chunkY);
+        const chunkSize = this.chunkManager.getChunkSize();
+
+        // Try to find a path tile to spawn on within this chunk
+        for (let localY = 0; localY < chunkSize.height; localY++) {
+            for (let localX = 0; localX < chunkSize.width; localX++) {
+                if (chunk.grid.getTile(localX, localY) === this.pathTileType) {
+                    const worldCoord = this.chunkManager.chunkLocalToWorld(chunkX, chunkY, localX, localY);
+                    this.x = worldCoord.worldX;
+                    this.y = worldCoord.worldY;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get current chunk coordinates
+     */
+    getCurrentChunk(): { chunkX: number; chunkY: number } | null {
+        if (!this.chunkManager) return null;
+        return this.chunkManager.worldToChunk(this.x, this.y);
+    }
+
+    /**
+     * Get local coordinates within current chunk
+     */
+    getLocalCoordinates(): { localX: number; localY: number } | null {
+        if (!this.chunkManager) return null;
+        return this.chunkManager.worldToLocal(this.x, this.y);
     }
 }
