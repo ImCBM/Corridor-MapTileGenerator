@@ -167,4 +167,4 @@ public minRegionDistance: number = 4;
 
 MIT License - Feel free to modify and distribute.
 
-~portfolio~
+`portfolio`
